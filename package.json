@@ -1,0 +1,24 @@
+{
+  "name": "clinic",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/viratcore01/clinic.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/viratcore01/clinic/issues"
+  },
+  "homepage": "https://github.com/viratcore01/clinic#readme",
+  "description": "",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.118.0",
+    "pg": "^8.23.1"
+  }
+}

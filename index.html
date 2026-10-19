@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>Patient Directory</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   body {font-family: Arial, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem;}
   .search {width: 100%; padding: 0.5rem; font-size: 1rem; margin-bottom: 1rem;}
@@ -19,11 +20,12 @@
   .modal {display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5);}
   .modal-content {background:#fff; margin:15% auto; padding:2rem; width:90%; max-width:500px; border-radius:8px; position:relative;}
   .close {position:absolute; right:10px; top:10px; font-size:1.5rem; font-weight:bold; cursor:pointer;}
+  #status {margin-left:0.75rem; color:#666; font-size:0.9rem;}
 </style>
 </head>
 <body>
 
-<h2>Patient Directory</h2>
+<h2>Patient Directory <span id="status"></span></h2>
 
 <!-- Search bar -->
 <input type="text" id="search" class="search" placeholder="Search by name, phone, or registration number...">
@@ -39,7 +41,7 @@
     <span class="close" onclick="closeModal()">&times;</span>
     <h3 id="modalTitle">Add New Patient</h3>
     <form id="patientForm">
-      <input type="hidden" id="editIndex" value="-1">
+      <input type="hidden" id="editId" value="">
       <input type="text" id="nameInput" placeholder="Name" required style="width:100%; padding:0.5rem; margin-bottom:0.5rem;">
       <input type="tel" id="phoneInput" placeholder="Phone Number" required style="width:100%; padding:0.5rem; margin-bottom:0.5rem;">
       <input type="text" id="regInput" placeholder="Registration Number" required style="width:100%; padding:0.5rem; margin-bottom:1rem;">
@@ -62,29 +64,45 @@
 </table>
 
 <script>
-  // ---------- DATA ----------
-  let patients = JSON.parse(localStorage.getItem('patients')) || [
-    { name: 'John Doe', phone: '555-1234', reg: 'REG101' },
-    { name: 'Jane Smith', phone: '555-5678', reg: 'REG102' },
-    { name: 'Alice Johnson', phone: '555-8765', reg: 'REG103' },
-    { name: 'Bob Brown', phone: '555-4321', reg: 'REG104' },
-    { name: 'Emily Davis', phone: '555-9876', reg: 'REG105' }
-  ];
+  // ---------- SUPABASE ----------
+  const SUPABASE_URL = 'https://oqarvapuiiqfjemqubfh.supabase.co';
+  const SUPABASE_KEY = 'sb_publishable_tbyvTAXpD9ApyZb7ZlMQVQ_z_On_TLt';
+  const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+  let patients = [];
+
+  function setStatus(msg) {
+    document.getElementById('status').textContent = msg ? '· ' + msg : '';
+  }
+
+  // ---------- LOAD FROM SUPABASE ----------
+  async function loadPatients() {
+    const { data, error } = await db.from('patients').select('*').order('id');
+    if (error) {
+      console.error('Load failed:', error);
+      setStatus('⚠ load failed: ' + error.message);
+      return;
+    }
+    patients = data || [];
+    renderPatients(document.getElementById('search').value);
+    setStatus(patients.length + ' patients');
+  }
 
   // ---------- MODAL HELPERS ----------
   function openAddModal() {
     document.getElementById('modalTitle').textContent = 'Add New Patient';
     document.getElementById('saveBtn').textContent = 'Save Patient';
-    document.getElementById('editIndex').value = '-1';
+    document.getElementById('editId').value = '';
     document.getElementById('patientForm').reset();
     document.getElementById('patientModal').style.display = 'block';
   }
 
-  function openEditModal(index) {
-    const p = patients[index];
+  function openEditModal(id) {
+    const p = patients.find(x => x.id === id);
+    if (!p) return;
     document.getElementById('modalTitle').textContent = 'Edit Patient';
     document.getElementById('saveBtn').textContent = 'Update Patient';
-    document.getElementById('editIndex').value = index;
+    document.getElementById('editId').value = id;
     document.getElementById('nameInput').value = p.name;
     document.getElementById('phoneInput').value = p.phone;
     document.getElementById('regInput').value = p.reg;
@@ -102,7 +120,7 @@
 
     const lower = filter.toLowerCase();
 
-    patients.forEach((p, index) => {
+    patients.forEach(p => {
       const matches = p.name.toLowerCase().includes(lower) ||
                       p.phone.toLowerCase().includes(lower) ||
                       p.reg.toLowerCase().includes(lower);
@@ -112,8 +130,8 @@
         tr.innerHTML =
           `<td>${p.name}</td><td>${p.phone}</td><td>${p.reg}</td>` +
           `<td>` +
-            `<button class="btn btn-edit row-btn" onclick="openEditModal(${index})">Edit</button>` +
-            `<button class="btn btn-delete row-btn" onclick="deletePatient(${index})">Delete</button>` +
+            `<button class="btn btn-edit row-btn" onclick="openEditModal(${p.id})">Edit</button>` +
+            `<button class="btn btn-delete row-btn" onclick="deletePatient(${p.id})">Delete</button>` +
           `</td>`;
         tbody.appendChild(tr);
       }
@@ -126,39 +144,46 @@
   });
 
   // ---------- ADD / EDIT PATIENT ----------
-  document.getElementById('patientForm').addEventListener('submit', e => {
+  document.getElementById('patientForm').addEventListener('submit', async e => {
     e.preventDefault();
 
     const name = document.getElementById('nameInput').value.trim();
     const phone = document.getElementById('phoneInput').value.trim();
     const reg = document.getElementById('regInput').value.trim();
-    const editIndex = parseInt(document.getElementById('editIndex').value, 10);
+    const editId = document.getElementById('editId').value;
 
     if (!name || !phone || !reg) return;
 
-    if (editIndex >= 0) {
-      patients[editIndex] = { name, phone, reg };
+    const row = { name, phone, reg };
+
+    if (editId) {
+      const { error } = await db.from('patients').update(row).eq('id', editId);
+      if (error) { setStatus('⚠ update failed: ' + error.message); return; }
+      setStatus('updated');
     } else {
-      patients.push({ name, phone, reg });
+      const { error } = await db.from('patients').insert(row);
+      if (error) { setStatus('⚠ insert failed: ' + error.message); return; }
+      setStatus('saved');
     }
 
-    localStorage.setItem('patients', JSON.stringify(patients));
-
     closeModal();
-    renderPatients(document.getElementById('search').value);
+    await loadPatients();
   });
 
   // ---------- DELETE PATIENT ----------
-  function deletePatient(index) {
-    if (!confirm(`Delete patient "${patients[index].name}"? This cannot be undone.`)) return;
+  async function deletePatient(id) {
+    const p = patients.find(x => x.id === id);
+    if (!p) return;
+    if (!confirm(`Delete patient "${p.name}"? This cannot be undone.`)) return;
 
-    patients.splice(index, 1);
-    localStorage.setItem('patients', JSON.stringify(patients));
-    renderPatients(document.getElementById('search').value);
+    const { error } = await db.from('patients').delete().eq('id', id);
+    if (error) { setStatus('⚠ delete failed: ' + error.message); return; }
+    setStatus('deleted');
+    await loadPatients();
   }
 
-  // ---------- INITIAL RENDER ----------
-  renderPatients();
+  // ---------- INITIAL LOAD ----------
+  loadPatients();
 </script>
 
 </body>
