@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Patient Directory</title>
+<style>
+  body { font-family: Arial, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
+  .search { width: 100%; padding: 0.5rem; font-size: 1rem; margin-bottom: 1rem; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { border: 1px solid #ddd; padding: 0.5rem; text-align: left; }
+  th { background #f2f2f2; }
+</style>
+</head>
+<body>
+
+<h2>Patient Directory</h2>
+
+<input type="text" id="search" class="search" placeholder="Search by name, phone, or registration number...">
+
+<table id="patientTable">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Phone Number</th>
+      <th>Registration Number</th>
+    </tr>
+  </thead>
+  <tbody>
+  </table>
+</table>
+
+<script>
+const patients = [
+  { name: 'John Doe', phone: '555-1234', reg: 'REG101' },
+  { name: 'Jane Smith', phone: '555-5678', reg: 'REG102' },
+  { name: 'Alice Johnson', phone: '555-8765', reg: 'REG103' },
+  { name: 'Bob Brown', phone: '555-4321', reg: 'REG104' },
+  { name: 'Emily Davis', phone: '555-9876', reg: 'REG105' }
+];
+
+const tbody = document.querySelector('#patientTable tbody');
+
+function renderPatients(filter) {
+  tbody.innerHTML = '';
+  patients.forEach(p => {
+    const lower = filter.toLowerCase();
+    if (p.name.toLowerCase().includes(lower) ||
+        p.phone.toLowerCase().includes(lower) ||
+        p.reg.toLowerCase().includes(lower)) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${p.name}</td><td>${p.phone}</td><td>${p.reg}</td>`;
+      tbody.appendChild(tr);
+    }
+  });
+}
+
+document.getElementById('search').addEventListener('input', (e) => {
+  renderPatients(e.target.value);
+});
+
+// initial render
+renderPatients('');
+</script>
+
+</body>
+</html>
