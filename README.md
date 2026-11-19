@@ -32,7 +32,8 @@ empty table made it look like every record had vanished.
 ## Where the clinic's records actually are
 
 The version before that commit kept them in the browser's `localStorage` under the key `patients`.
-Those records are still on the machine that used the site:
+That key was **never deleted** by the Supabase commit — the page simply stopped reading it. So the
+records from that period are still on the machine that used the site:
 
 1. **Same browser, same link** → open the new page and they are restored automatically on first load
    (a blue banner says how many).
@@ -40,12 +41,32 @@ Those records are still on the machine that used the site:
    it on the next visit.
 3. **Different computer** → run the snippet in `recovery-snippet.txt` in the browser that was used,
    then load the saved JSON with **Restore**.
-4. **Records only existed in a real cloud project** → that project can be restored from the Supabase
-   dashboard if it is paused, or from a Supabase backup if it was deleted.
 
-A machine-level search of this computer (Chrome, Brave, Edge: localStorage, IndexedDB, session data)
-found **no** patient records for the old site, which confirms the data lives with the clinic's own
-browser rather than with this development machine.
+### The three copies of this app, and the key each one used
+
+Browser storage is per-origin, so a record added on one address is invisible on another. All three
+addresses have been checked:
+
+| Address | Store | Notes |
+| --- | --- | --- |
+| `clinic-ochre-seven.vercel.app` | `localStorage['patients']` (before `60c7f4a`); dead Supabase after | Records added after `60c7f4a` were sent to a host that never existed and cannot be recovered from the server |
+| `site-90530542…freebuff.page` | `localStorage['vitalis_cache_v2']` = `{patients, notes}` plus Cloudflare D1 behind Freebuff sign-in | A second, independent mirror; extra patients may exist here |
+| `patient.129.154.239.74.sslip.io` | SQLite on the VM, exposed by `/api/patients` and `/api/notes` | 31 patients + 30 notes; this is the built-in registry |
+
+The fixed page now reads **all** of these local keys on boot (`patients`, `vitalis_cache_v2`,
+`vitalis_notes_v1`) and merges them, keeping an untouched copy of the foreign payload in
+`vitalis_backup_v1`. Clinical notes are shown in their own column and are editable in the patient
+form, so the 30 notes from the VM are visible instead of hidden in `meta`.
+
+### Server-side stores: what was checked and what is left
+
+- Supabase `oqarvapuiiqfjemqubfh` — **never existed** (see above). Nothing to recover.
+- Oracle ADB `patientdb_high` — wallet committed in the `patient` repo, but no DB credentials were
+  ever committed; can be queried only with the clinic's Oracle login.
+- Cloudflare D1 behind the freebuff.page site — real and populated by that deployment, but every
+  route is auth-wrapped (`/api/patients` returns `401 Sign in required`). It can only be exported by
+  signing in with the doctor's own Freebuff account.
+- VM SQLite — fully exposed; already snapshotted.
 
 `data/live-registry-backup-2026-11-19.json` is a verbatim snapshot of the clinic registry that is
 currently live on the Oracle VM backend (`patient.129.154.239.74.sslip.io`), all 31 patients with

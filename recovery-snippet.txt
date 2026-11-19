@@ -4,11 +4,24 @@ HOW TO GET THE CLINIC'S EXISTING RECORDS OFF A COMPUTER
 Do this on the computer and in the browser the clinic actually used to
 enter patients. Nothing is uploaded anywhere; you just copy text out.
 
-STEP 1 - Open the clinic link in that browser
+IMPORTANT: browser storage is kept separately for every web address
+(origin). The clinic app has lived on three addresses, and each one kept
+its own copy:
+
+  1. https://clinic-ochre-seven.vercel.app      (key: patients)
+  2. https://site-90530542d24f4a0a8f220f83ab1afa1d.freebuff.page
+                                                (key: vitalis_cache_v2)
+  3. https://patient.129.154.239.74.sslip.io    (server-side; see note)
+
+Run STEP 3 once on EACH address in that browser, and save a separate
+file from each. Then restore all the files into the fixed page. They
+merge; nothing is overwritten.
+
+STEP 1 - Open one clinic link in that browser
 ---------------------------------------------
-Use the exact same address that was used before, for example
+Use the exact same address that was used before. Start with
 https://clinic-ochre-seven.vercel.app
-(If a Vercel "preview" address was used, open that one instead.)
+Then repeat with the freebuff.page address above.
 
 STEP 2 - Open the browser console
 ---------------------------------
@@ -18,50 +31,97 @@ Mac:              Cmd + Option + J
 
 STEP 3 - Paste this and press Enter
 -----------------------------------
-copy(JSON.stringify({patients: (() => {
-  const read = (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } };
-  const legacy = read('patients') || [];
+copy(JSON.stringify((() => {
+  const read = k => { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } };
+  const out = new Map();
+  const add = p => {
+    if (!p || typeof p !== 'object') return;
+    const row = Object.assign({}, p.meta || {}, p);
+    if (!row.reg && row.id != null && !/^\d+$/.test(String(row.id).trim())) row.reg = String(row.id).trim();
+    if (!(row.name || row.phone || row.reg)) return;
+    const k = String(row.reg || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+           || String(row.phone || '').replace(/\D/g, '')
+           || String(row.name || '').toLowerCase();
+    if (!out.has(k)) out.set(k, row);
+  };
+  const legacy = read('patients');
+  if (Array.isArray(legacy)) legacy.forEach(add);
   const state = read('clinic_state_v2');
-  const backup = read('patients_backup_v1') || [];
-  const seen = new Map();
-  [].concat(
-    Array.isArray(legacy) ? legacy : [],
-    (state && Array.isArray(state.rows)) ? state.rows : [],
-    Array.isArray(backup) ? backup : []
-  ).filter(p => p && (p.name || p.phone || p.reg)).forEach(p => {
-    const row = Object.assign({ name: p.name || '', phone: p.phone || '', reg: p.reg || '' }, p.meta || {});
-    const k = (row.reg || '').toLowerCase().replace(/[^a-z0-9]/g, '') || (row.phone || '').replace(/\D/g, '') || row.name.toLowerCase();
-    if (!seen.has(k)) seen.set(k, row);
+  if (state && Array.isArray(state.rows)) state.rows.forEach(add);
+  const backup = read('patients_backup_v1');
+  if (Array.isArray(backup)) backup.forEach(add);
+  const cache = read('vitalis_cache_v2');
+  const cacheRows = Array.isArray(cache) ? cache : (cache && Array.isArray(cache.patients) ? cache.patients : []);
+  const notes = read('vitalis_notes_v1') || (cache && cache.notes) || {};
+  cacheRows.forEach(p => {
+    const r = Object.assign({}, p);
+    if (notes[r.id] && !r.notes) r.notes = notes[r.id];
+    add(r);
   });
-  return Array.from(seen.values());
-})()}, null, 2))
+  return { origin: location.origin, takenAt: new Date().toISOString(), patients: Array.from(out.values()) };
+})(), null, 2))
 
 If `copy` is not defined in that browser, run the same thing without the
 `copy(...)` wrapper and copy the printed text by hand.
 
+OPTIONAL - if the page shows 0 records but the clinic used this browser
+-----------------------------------------------------------------------
+The fixed page also keeps a second copy in IndexedDB. Paste this to read
+it (it prints the result; copy it by hand if needed):
+
+indexedDB.open('clinic-directory', 1).onsuccess = e => {
+  const db = e.target.result;
+  const req = db.transaction('kv', 'readonly').objectStore('kv').get('state');
+  req.onsuccess = () => console.log(JSON.stringify(req.result, null, 2));
+};
+
 STEP 4 - Save it
 ----------------
-Paste into Notepad (or any text editor) and save as
-    patients-old.json
+Paste into Notepad (or any text editor) and save as, for example
+    patients-vercel.json
+    patients-freebuff.json
 
 STEP 5 - Load it into the fixed page
 ------------------------------------
-Open the new Patient Directory page, press "Restore", and choose
-patients-old.json. It merges; it never overwrites or deletes anything.
-Check the number in the green pill afterwards.
+Open the new Patient Directory page, press "Restore", and choose the
+file(s). It merges; it never overwrites or deletes anything. Check the
+number in the green pill afterwards.
 
-If STEP 3 gives `{"patients":[]}`, that browser has no saved records -
-try the other browser(s) on that computer, or the other computer used at
-the clinic. If every browser is empty, the records were never stored in
-a browser, and the only remaining source is a Supabase project backup
-(Supabase dashboard -> project -> Backups), which needs access to the
-account that owned the project.
+If STEP 3 gives an empty "patients" list on every address in every
+browser, then the records are not in that browser at all. The only
+remaining server-side source is the Cloudflare D1 database behind the
+freebuff.page site, which requires signing in there with the clinic's
+own Freebuff account (the doctor's login), then adding the records once
+and using "Backup" to export them.
+
+
+WHERE THE DATA ACTUALLY WENT (summary)
+--------------------------------------
+- The Vercel app stored records in browser localStorage under `patients`
+  until commit 60c7f4a ("Connect patient directory to Supabase").
+- That commit deleted the localStorage read/write code and pointed the
+  page at https://oqarvapuiiqfjemqubfh.supabase.co . That host never
+  existed (NXDOMAIN, no DNS history, no certificate ever issued), so any
+  patient added after that commit was sent to a black hole and lost.
+- Records added BEFORE that commit are still sitting in the browser's
+  `patients` key. The old code never deleted them on upgrade, it just
+  stopped reading them. The fixed page reads and migrates them now.
+- The freebuff.page deployment kept its own mirror in `vitalis_cache_v2`
+  and synced to a Cloudflare D1 database behind Freebuff sign-in. Extra
+  patients added there are in that key and/or that D1 database.
+- The Oracle VM deployment (patient.129.154.239.74.sslip.io) has its own
+  SQLite file with 31 patients and 30 clinical notes, all reachable via
+  its API. It is the source of the built-in registry in the fixed page.
 
 
 CHECKING THIS DEVELOPMENT MACHINE (already done)
-------------------------------------------------
+-----------------------------------------------
 Scanned: Chrome, Brave and Edge profiles (Default + Profile N),
-localStorage, IndexedDB and session storage, looking for
-`clinic-ochre`, the Supabase project ref, and `patients` keys.
+localStorage, IndexedDB and session storage; all git branches and
+commits of the clinic/patient repos; all local SQLite/DB files; the
+Vercel, freebuff.page and Oracle VM deployments.
 
-Result: no patient records for that site exist on this machine.
+Result: no additional patient records for the clinic exist on this
+machine. The 31 patients + 30 notes are the complete set available from
+any server; anything beyond that is only in the clinic's own browser or
+in the D1 database behind the doctor's Freebuff login.

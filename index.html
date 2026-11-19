@@ -74,6 +74,9 @@
   tbody tr:hover { background: #fafcff; }
   td.actions { white-space: nowrap; }
   td.actions .btn + .btn { margin-left: .3rem; }
+  td.notes-cell { max-width: 260px; color: var(--muted); }
+  td.notes-cell .note-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  td.notes-cell .note-text.is-empty { opacity: .4; }
   .empty { padding: 2rem 1rem; text-align: center; color: var(--muted); font-size: .9rem; }
 
   .modal { display: none; position: fixed; inset: 0; background: rgba(10, 18, 28, .55); padding: 1rem; overflow-y: auto; z-index: 50; }
@@ -85,11 +88,13 @@
   .modal-content h2 { margin: 0 0 1rem; font-size: 1.1rem; }
   .close { position: absolute; right: .75rem; top: .4rem; font-size: 1.6rem; line-height: 1; background: none; border: none; cursor: pointer; color: var(--muted); }
   label.field { display: block; font-size: .8rem; font-weight: 600; color: var(--muted); margin-bottom: .9rem; }
-  label.field input {
+  label.field input, label.field textarea {
     display: block; width: 100%; margin-top: .3rem; padding: .55rem .65rem;
     font-size: .95rem; font-weight: 400; border: 1px solid var(--line); border-radius: 8px; color: var(--ink);
+    font-family: inherit;
   }
-  label.field input:focus { outline: 2px solid #b8d4f5; border-color: var(--accent); }
+  label.field textarea { resize: vertical; min-height: 4.2rem; }
+  label.field input:focus, label.field textarea:focus { outline: 2px solid #b8d4f5; border-color: var(--accent); }
   .hint { font-size: .78rem; color: var(--muted); font-weight: 400; margin-top: .25rem; }
   code.sql {
     display: block; white-space: pre-wrap; word-break: break-word; font-size: .74rem;
@@ -109,7 +114,7 @@
   #toast button { background: none; border: none; color: #8fd0ff; font-weight: 700; cursor: pointer; font-size: .85rem; }
   .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   @media (max-width: 620px) {
-    th:nth-child(3), td:nth-child(3) { display: none; }
+    th:nth-child(4), td:nth-child(4) { display: none; }
     body { padding: 1.1rem .75rem 3rem; }
   }
 </style>
@@ -145,6 +150,7 @@
         <th>Name</th>
         <th>Phone Number</th>
         <th>Registration Number</th>
+        <th>Clinical Notes</th>
         <th>Actions</th>
       </tr>
     </thead>
@@ -168,6 +174,9 @@
       </label>
       <label class="field">Registration Number
         <input type="text" id="regInput" placeholder="Registration number" required autocomplete="off">
+      </label>
+      <label class="field">Clinical Notes (optional)
+        <textarea id="notesInput" rows="3" placeholder="Diagnosis, remedy, follow-up…"></textarea>
       </label>
       <div class="modal-actions">
         <button type="submit" class="btn" id="saveBtn">Save Patient</button>
@@ -230,6 +239,15 @@ create policy "clinic full access" on patients
   var LEGACY_KEY = 'patients';
   var STATE_KEY = 'clinic_state_v2';
   var BACKUP_KEY = 'patients_backup_v1';
+  /**
+   * Other copies of this same clinic app have lived on other hosts. Their
+   * browsers keep the records under these keys instead of `patients`, so we
+   * read them too — that is where any extra patients the doctor added on the
+   * other deployment will be found.
+   */
+  var FOREIGN_CACHE_KEY = 'vitalis_cache_v2';
+  var FOREIGN_NOTES_KEY = 'vitalis_notes_v1';
+  var FOREIGN_BACKUP_KEY = 'vitalis_backup_v1';
   var SNAPSHOT_PREFIX = 'clinic_snapshot_';
   var CLOUD_KEY = 'clinic_cloud_v1';
   var IDB_NAME = 'clinic-directory';
@@ -368,6 +386,40 @@ create policy "clinic full access" on patients
     });
   }
 
+  /**
+   * Reads the offline mirrors written by the other deployments of this app
+   * (`vitalis_cache_v2` = { patients, notes }, `vitalis_notes_v1` = reg→note).
+   * Returns the rows plus an untouched copy of the raw payloads for backup.
+   */
+  function readForeignStore() {
+    var cache = readJSON(FOREIGN_CACHE_KEY);
+    var notes = readJSON(FOREIGN_NOTES_KEY);
+    var list = [];
+    if (Array.isArray(cache)) list = cache;
+    else if (cache && Array.isArray(cache.patients)) list = cache.patients;
+    if (cache && cache.notes && typeof cache.notes === 'object') notes = cache.notes;
+
+    var rows = legacyToRows(list);
+
+    if (notes && typeof notes === 'object') {
+      var byReg = {};
+      rows.forEach(function (r) {
+        var key = slug(r.reg);
+        if (key) byReg[key] = r;
+      });
+      for (var reg in notes) {
+        var note = text(notes[reg]);
+        if (!note) continue;
+        var row = byReg[slug(reg)];
+        if (!row) continue;
+        row.meta = row.meta || {};
+        if (!row.meta.notes) row.meta.notes = note;
+      }
+    }
+
+    return { rows: rows, raw: { cache: cache || null, notes: notes || null } };
+  }
+
   function sanitizeState(raw) {
     if (!raw || typeof raw !== 'object' || !Array.isArray(raw.rows)) return null;
     var rows = [];
@@ -488,6 +540,19 @@ create policy "clinic full access" on patients
       var added = mergeRows(state.rows, legacy);
       if (added > 0 && stored) {
         bootNotes.push(added + ' record' + (added === 1 ? '' : 's') + ' recovered from the earlier version of this page.');
+      }
+    }
+
+    // Extra records from the clinic's other deployments (e.g. the cloud-sync
+    // site). These are the ones the doctor may have added away from here.
+    var foreign = readForeignStore();
+    if (foreign.rows.length) {
+      if (!readJSON(FOREIGN_BACKUP_KEY)) {
+        try { localStorage.setItem(FOREIGN_BACKUP_KEY, JSON.stringify(foreign.raw)); } catch (e) {}
+      }
+      var extra = mergeRows(state.rows, foreign.rows);
+      if (extra > 0) {
+        bootNotes.push(extra + ' record' + (extra === 1 ? '' : 's') + ' recovered from the clinic\'s other device copy.');
       }
     }
   }
@@ -631,6 +696,16 @@ create policy "clinic full access" on patients
         td.textContent = value;
         tr.appendChild(td);
       });
+
+      var note = (p.meta && p.meta.notes) ? String(p.meta.notes) : '';
+      var notesTd = document.createElement('td');
+      notesTd.className = 'notes-cell';
+      var noteText = document.createElement('span');
+      noteText.className = 'note-text' + (note ? '' : ' is-empty');
+      noteText.textContent = note || '—';
+      noteText.title = note || '';
+      notesTd.appendChild(noteText);
+      tr.appendChild(notesTd);
 
       var actions = document.createElement('td');
       actions.className = 'actions';
@@ -783,6 +858,7 @@ create policy "clinic full access" on patients
     $('nameInput').value = p.name;
     $('phoneInput').value = p.phone;
     $('regInput').value = p.reg;
+    $('notesInput').value = (p.meta && p.meta.notes) ? String(p.meta.notes) : '';
     openModal('patientModal');
   }
 
@@ -792,6 +868,7 @@ create policy "clinic full access" on patients
     var name = $('nameInput').value.trim();
     var phone = $('phoneInput').value.trim();
     var reg = $('regInput').value.trim();
+    var notes = $('notesInput').value.trim();
     var editUid = $('editId').value;
 
     if (!name || !phone || !reg) {
@@ -816,10 +893,13 @@ create policy "clinic full access" on patients
       row.name = name;
       row.phone = phone;
       row.reg = reg;
+      row.meta = row.meta || {};
+      if (notes) row.meta.notes = notes;
+      else delete row.meta.notes;
       row.updatedAt = stamp;
       toast('Saved changes to ' + name + '.');
     } else {
-      state.rows.push(normalizeRow({ name: name, phone: phone, reg: reg, createdAt: stamp, updatedAt: stamp }));
+      state.rows.push(normalizeRow({ name: name, phone: phone, reg: reg, notes: notes, createdAt: stamp, updatedAt: stamp }));
       toast('Added ' + name + '.');
     }
 
