@@ -1145,7 +1145,7 @@ create policy "clinic full access" on patients
         return { res: res, data: data };
       });
     }).then(function (out) {
-      if (out.res.status === 503) {
+      if ((out.data && out.data.configured === false) || out.res.status === 503) {
         backupState = 'unconfigured';
         backupDetail = out.data && out.data.error || '';
         return;
@@ -1181,6 +1181,12 @@ create policy "clinic full access" on patients
         }
         if (!res.ok) throw new Error('HTTP ' + res.status);
         return res.json().then(function (data) {
+          if (data && data.configured === false) {
+            backupState = 'unconfigured';
+            backupDetail = data.error || '';
+            renderBackupStatus();
+            return 0;
+          }
           var snap = data && data.snapshot;
           if (!snap || !Array.isArray(snap.rows)) { renderBackupStatus(); return 0; }
           var rows = snap.rows.filter(isPatient).map(function (r) { return normalizeRow(r); });

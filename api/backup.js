@@ -160,8 +160,9 @@ async function newestSnapshot(c, dir) {
 module.exports = async function handler(req, res) {
   const c = cfg();
   if (!c.repo || !c.token) {
-    return json(res, 503, {
+    return json(res, 200, {
       ok: false,
+      configured: false,
       error: 'Backup is not configured on the server. Set GITHUB_TOKEN and BACKUP_REPO in Vercel, then redeploy.'
     });
   }
