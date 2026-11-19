@@ -2,188 +2,1362 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
 <title>Patient Directory</title>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
-  body {font-family: Arial, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem;}
-  .search {width: 100%; padding: 0.5rem; font-size: 1rem; margin-bottom: 1rem;}
-  table {width: 100%; border-collapse: collapse; margin-top: 1rem;}
-  th, td {border: 1px solid #ddd; padding: 0.5rem; text-align: left;}
-  th {background:#f2f2f2;}
-  .btn {padding: 0.5rem 1rem; cursor: pointer; background:#007bff; color:#fff; border:none; border-radius:4px;}
-  .btn:hover {background:#005fcc;}
-  .btn-edit {background:#28a745;}
-  .btn-edit:hover {background:#1e7e34;}
-  .btn-delete {background:#dc3545;}
-  .btn-delete:hover {background:#a71d2a;}
-  .row-btn {padding: 0.25rem 0.6rem; font-size: 0.85rem; margin-right: 0.25rem;}
-  .modal {display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5);}
-  .modal-content {background:#fff; margin:15% auto; padding:2rem; width:90%; max-width:500px; border-radius:8px; position:relative;}
-  .close {position:absolute; right:10px; top:10px; font-size:1.5rem; font-weight:bold; cursor:pointer;}
-  #status {margin-left:0.75rem; color:#666; font-size:0.9rem;}
+  :root {
+    --ink: #16202b;
+    --muted: #5d6b7a;
+    --line: #dfe6ee;
+    --bg: #f6f8fb;
+    --card: #ffffff;
+    --accent: #0b6bcb;
+    --accent-dark: #0757a6;
+    --ok: #0f7a3d;
+    --warn: #a86400;
+    --danger: #b3261e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+    max-width: 900px; margin: 0 auto; padding: 2rem 1rem 4rem;
+    color: var(--ink); background: var(--bg); line-height: 1.45;
+  }
+  h1 { font-size: 1.4rem; margin: 0; }
+  header { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+  .sub { color: var(--muted); font-size: .85rem; margin: .15rem 0 0; }
+  .pills { display: flex; flex-wrap: wrap; gap: .4rem; }
+  .pill {
+    font-size: .75rem; font-weight: 600; padding: .28rem .6rem; border-radius: 999px;
+    background: #eef2f7; color: var(--muted); border: 1px solid var(--line); white-space: nowrap;
+  }
+  .pill.ok { background: #e7f6ec; color: var(--ok); border-color: #bfe6cc; }
+  .pill.warn { background: #fdf3e2; color: var(--warn); border-color: #f0dcb8; }
+  .pill.bad { background: #fdeceb; color: var(--danger); border-color: #f3c6c2; }
+
+  .banner {
+    border: 1px solid #f0dcb8; background: #fdf7ea; color: #6b4a00;
+    padding: .85rem 1rem; border-radius: 10px; margin-bottom: 1rem; font-size: .9rem;
+  }
+  .banner.info { border-color: #bfd8f5; background: #eef5fd; color: #16436e; }
+  .banner b { font-weight: 700; }
+  .banner .row { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .6rem; }
+  .banner button.link {
+    background: none; border: none; padding: 0; color: inherit; font: inherit;
+    text-decoration: underline; cursor: pointer;
+  }
+
+  .toolbar { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: .85rem; }
+  .search { flex: 1 1 260px; padding: .6rem .75rem; font-size: 1rem; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+  .search:focus { outline: 2px solid #b8d4f5; border-color: var(--accent); }
+
+  .btn {
+    padding: .55rem .9rem; cursor: pointer; background: var(--accent); color: #fff;
+    border: 1px solid transparent; border-radius: 8px; font-size: .9rem; font-weight: 600;
+  }
+  .btn:hover { background: var(--accent-dark); }
+  .btn.ghost { background: var(--card); color: var(--ink); border-color: var(--line); font-weight: 500; }
+  .btn.ghost:hover { background: #eef2f7; }
+  .btn.small { padding: .25rem .55rem; font-size: .8rem; border-radius: 6px; }
+  .btn-edit { background: #1d7f46; }
+  .btn-edit:hover { background: #15643a; }
+  .btn-delete { background: #c02b22; }
+  .btn-delete:hover { background: #9d221b; }
+  .btn:focus-visible, .link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: .6rem .7rem; text-align: left; border-bottom: 1px solid var(--line); font-size: .92rem; }
+  th { background: #f0f4f9; font-size: .78rem; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: #fafcff; }
+  td.actions { white-space: nowrap; }
+  td.actions .btn + .btn { margin-left: .3rem; }
+  .empty { padding: 2rem 1rem; text-align: center; color: var(--muted); font-size: .9rem; }
+
+  .modal { display: none; position: fixed; inset: 0; background: rgba(10, 18, 28, .55); padding: 1rem; overflow-y: auto; z-index: 50; }
+  .modal.open { display: block; }
+  .modal-content {
+    background: #fff; margin: 6vh auto; padding: 1.4rem; width: 100%; max-width: 520px;
+    border-radius: 12px; position: relative; box-shadow: 0 18px 50px rgba(9, 20, 33, .25);
+  }
+  .modal-content h2 { margin: 0 0 1rem; font-size: 1.1rem; }
+  .close { position: absolute; right: .75rem; top: .4rem; font-size: 1.6rem; line-height: 1; background: none; border: none; cursor: pointer; color: var(--muted); }
+  label.field { display: block; font-size: .8rem; font-weight: 600; color: var(--muted); margin-bottom: .9rem; }
+  label.field input {
+    display: block; width: 100%; margin-top: .3rem; padding: .55rem .65rem;
+    font-size: .95rem; font-weight: 400; border: 1px solid var(--line); border-radius: 8px; color: var(--ink);
+  }
+  label.field input:focus { outline: 2px solid #b8d4f5; border-color: var(--accent); }
+  .hint { font-size: .78rem; color: var(--muted); font-weight: 400; margin-top: .25rem; }
+  code.sql {
+    display: block; white-space: pre-wrap; word-break: break-word; font-size: .74rem;
+    background: #f4f6f9; border: 1px solid var(--line); border-radius: 8px; padding: .6rem; color: #24313f;
+    max-height: 190px; overflow: auto;
+  }
+  .modal-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: 1rem; }
+  .modal-actions .btn:last-child { margin-left: auto; }
+
+  #toast {
+    position: fixed; left: 50%; bottom: 1.2rem; transform: translate(-50%, 1.5rem);
+    background: #22303d; color: #fff; padding: .65rem 1rem; border-radius: 10px; font-size: .85rem;
+    display: flex; gap: .8rem; align-items: center; opacity: 0; pointer-events: none;
+    transition: opacity .18s ease, transform .18s ease; z-index: 60; max-width: min(92vw, 480px);
+  }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+  #toast button { background: none; border: none; color: #8fd0ff; font-weight: 700; cursor: pointer; font-size: .85rem; }
+  .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  @media (max-width: 620px) {
+    th:nth-child(3), td:nth-child(3) { display: none; }
+    body { padding: 1.1rem .75rem 3rem; }
+  }
 </style>
 </head>
 <body>
 
-<h2>Patient Directory <span id="status"></span></h2>
+<header>
+  <div>
+    <h1>Patient Directory</h1>
+    <p class="sub">Saved on this device first — nothing is lost if the internet or the cloud is down.</p>
+  </div>
+  <div class="pills">
+    <span id="localStatus" class="pill">loading…</span>
+    <span id="cloudStatus" class="pill">cloud: not set up</span>
+  </div>
+</header>
 
-<!-- Search bar -->
-<input type="text" id="search" class="search" placeholder="Search by name, phone, or registration number...">
+<div id="banner" class="banner" hidden></div>
 
-<!-- Add Patient button -->
-<button class="btn" onclick="openAddModal()">
-  Add Patient
-</button>
+<div class="toolbar">
+  <input type="search" id="search" class="search" placeholder="Search by name, phone, or registration number…" autocomplete="off" spellcheck="false" aria-label="Search patients">
+  <button class="btn" id="openAddBtn" type="button">Add Patient</button>
+  <button class="btn ghost" id="exportBtn" type="button">Backup</button>
+  <button class="btn ghost" id="importBtn" type="button">Restore</button>
+  <button class="btn ghost" id="cloudBtn" type="button">Cloud</button>
+  <input type="file" id="importFile" class="visually-hidden" accept="application/json,.json,text/csv,.csv" tabindex="-1" aria-hidden="true">
+</div>
 
-<!-- Patient Modal (add or edit) -->
-<div id="patientModal" class="modal">
+<div class="card">
+  <table id="patientTable">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Phone Number</th>
+        <th>Registration Number</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  <div class="empty" id="emptyState" hidden></div>
+</div>
+
+<!-- Add / edit patient -->
+<div id="patientModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
   <div class="modal-content">
-    <span class="close" onclick="closeModal()">&times;</span>
-    <h3 id="modalTitle">Add New Patient</h3>
+    <button class="close" type="button" data-close-modal aria-label="Close">&times;</button>
+    <h2 id="modalTitle">Add New Patient</h2>
     <form id="patientForm">
       <input type="hidden" id="editId" value="">
-      <input type="text" id="nameInput" placeholder="Name" required style="width:100%; padding:0.5rem; margin-bottom:0.5rem;">
-      <input type="tel" id="phoneInput" placeholder="Phone Number" required style="width:100%; padding:0.5rem; margin-bottom:0.5rem;">
-      <input type="text" id="regInput" placeholder="Registration Number" required style="width:100%; padding:0.5rem; margin-bottom:1rem;">
-      <button type="submit" class="btn" style="width:100%; margin-top:0.5rem;" id="saveBtn">Save Patient</button>
+      <label class="field">Name
+        <input type="text" id="nameInput" placeholder="Full name" required autocomplete="off">
+      </label>
+      <label class="field">Phone Number
+        <input type="tel" id="phoneInput" placeholder="Phone number" required autocomplete="off">
+      </label>
+      <label class="field">Registration Number
+        <input type="text" id="regInput" placeholder="Registration number" required autocomplete="off">
+      </label>
+      <div class="modal-actions">
+        <button type="submit" class="btn" id="saveBtn">Save Patient</button>
+      </div>
     </form>
   </div>
 </div>
 
-<table id="patientTable">
-  <thead>
-    <tr>
-      <th>Name</th>
-      <th>Phone Number</th>
-      <th>Registration Number</th>
-      <th>Actions</th>
-    </tr>
-  </thead>
-  <tbody>
-  </tbody>
-</table>
+<!-- Cloud settings -->
+<div id="cloudModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="cloudTitle">
+  <div class="modal-content">
+    <button class="close" type="button" data-close-modal aria-label="Close">&times;</button>
+    <h2 id="cloudTitle">Cloud backup (optional)</h2>
+    <p class="hint" style="margin-top:-.6rem">
+      The directory always works offline on this device. Adding a live Supabase project gives you a
+      shared backup that survives a new computer or a cleared browser.
+    </p>
+    <form id="cloudForm">
+      <label class="field">Project URL
+        <input type="url" id="cloudUrl" placeholder="https://yourproject.supabase.co" autocomplete="off" spellcheck="false">
+      </label>
+      <label class="field">Publishable / anon key
+        <input type="text" id="cloudKey" placeholder="sb_publishable_… or eyJhbGciOi…" autocomplete="off" spellcheck="false">
+      </label>
+      <div class="modal-actions">
+        <button type="submit" class="btn">Save &amp; test</button>
+        <button type="button" class="btn ghost" id="disableCloudBtn">Turn off</button>
+      </div>
+    </form>
+    <p class="hint" id="cloudTestResult" style="margin-top:.6rem"></p>
+    <details style="margin-top:1rem">
+      <summary style="cursor:pointer;font-size:.85rem;font-weight:600">First time? Run this in the Supabase SQL editor</summary>
+      <code class="sql">create table if not exists patients (
+  id bigint generated by default as identity primary key,
+  name text not null,
+  phone text not null,
+  reg text not null,
+  created_at timestamptz not null default now()
+);
+
+alter table patients enable row level security;
+
+create policy "clinic full access" on patients
+  for all to anon using (true) with check (true);</code>
+    </details>
+  </div>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
 
 <script>
-  // ---------- SUPABASE ----------
-  const SUPABASE_URL = 'https://oqarvapuiiqfjemqubfh.supabase.co';
-  const SUPABASE_KEY = 'sb_publishable_tbyvTAXpD9ApyZb7ZlMQVQ_z_On_TLt';
-  const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+(function () {
+  'use strict';
 
-  let patients = [];
+  /* ------------------------------------------------------------------
+   * Storage keys
+   * `patients` is the key the previous versions of this page used, so it
+   * is read on boot to bring old records back, and kept in sync afterwards.
+   * ------------------------------------------------------------------ */
+  var LEGACY_KEY = 'patients';
+  var STATE_KEY = 'clinic_state_v2';
+  var BACKUP_KEY = 'patients_backup_v1';
+  var SNAPSHOT_PREFIX = 'clinic_snapshot_';
+  var CLOUD_KEY = 'clinic_cloud_v1';
+  var IDB_NAME = 'clinic-directory';
+  var IDB_STORE = 'kv';
+  var MAX_SNAPSHOTS = 5;
 
-  function setStatus(msg) {
-    document.getElementById('status').textContent = msg ? '· ' + msg : '';
+  var state = { version: 2, savedAt: 0, rows: [], tombstones: {}, cloudLastSync: 0, seeded: false };
+  var cloud = { url: '', key: '', enabled: false };
+  var bootNotes = [];
+  var cloudState = 'off'; // off | syncing | ok | error
+  var cloudDetail = '';
+  var localSaveFailed = false;
+  var hydrated = false;
+
+  /**
+   * The clinic's registry as it was saved on the clinic server, so a fresh
+   * device (or one whose browser storage was wiped) starts with the real
+   * patient list instead of an empty table.
+   * Format: [name, phone, registration number, notes]
+   */
+  var BUILT_IN_REGISTRY = [
+    ["Ananya Sharma", "9876543210", "HM-2021-0012", "Chronic allergic rhinitis; prescribed Arsenicum album 30C. Follow-up every 3 weeks."],
+    ["Rohan Mehta", "9822011456", "HM-2021-0034", "Migraine since 2018; worse with sunlight. Speranthus 6X in progress."],
+    ["Priya Deshpande", "9770122334", "HM-2021-0078", "Hypothyroid, on allopathic support; constitutional remedy Natrum mur."],
+    ["Arjun Patel", "9890445566", "HM-2022-0021", "Sports knee injury; Rhus tox 30C, physiotherapy advised."],
+    ["Sneha Kulkarni", "9601347789", "HM-2022-0069", "Acne and PCOS symptoms; Sepia 200C started, diet chart shared."],
+    ["Vikram Singh Rathore", "9740002233", "HM-2022-0102", "Lumbar spondylosis; Bryonia for aggravation on motion."],
+    ["Ishita Banerjee", "9830129902", "HM-2022-0147", "Hairfall post typhoid; Silicea 200C weekly."],
+    ["Karan Chopra", "9811557744", "HM-2023-0017", "Insomnia with racing thoughts; Coffea cruda at night."],
+    ["Meera Iyer", "9841108877", "HM-2023-0055", "Diabetes type 2 — diet-controlled. Lycopodium constitutional."],
+    ["Aditya Nair", "9633217700", "HM-2023-0104", "Exam anxiety and sweating palms; Gelsemium 30C."],
+    ["Divya Kotian", "9663441200", "HM-2023-0136", "Repeated cold sores; Natrum mur 200C fortnightly."],
+    ["Suresh Gowda", "9482334455", "HM-2024-0003", "Hypertension on medication; audit BP monthly."],
+    ["Fatima Khan", "9920338877", "HM-2024-0062", "Migraine with aura; Iris versicolor 200C trial."],
+    ["Nikhil Verma", "9839441122", "HM-2024-0088", "Frozen shoulder right side; Sanguinaria + shoulder pendulum exercises."],
+    ["Ayesha Siddiqui", "9650992200", "HM-2024-0115", "Post-partum hairloss and fatigue; Ferrum met 3X daily."],
+    ["Gaurav Jain", "9491888444", "HM-2024-0163", "Antral gastritis; Nux vomica 30C with meal rules."],
+    ["Tanvi Bhatt", "9760998800", "HM-2025-0009", "Vertigo on standing; China officinalis 3X."],
+    ["Harsh Agarwal", "9045991177", "HM-2025-0040", "Acne vulgaris grade II; Hepar sulph 30C alternate evenings."],
+    ["Gayatri Rao", "9188822044", "HM-2025-0081", "Knee osteoarthritis; Calcarea fluor 3X with warm compresses."],
+    ["Mohammed Rizwan", "9207774411", "HM-2025-0119", "Pollen-sensitive asthma; elderberry pollen season advisory."],
+    ["Sanya Kapoor", "9988776655", "HM-2025-0144", "Irregular periods; Pulsatilla 30C, cycle diary maintained."],
+    ["Yash Thakur", "9819933011", "HM-2026-0005", "Tennis elbow; Ruta grav 30C, rest protocol."],
+    ["Anita Joseph", "9447552110", "HM-2026-0027", "Perimenopausal flushes; Sepia 200C monthly."],
+    ["Deepak Kumar", "9868877551", "HM-2026-0043", "Cervical spondylosis; calcarea carb 200C weekly."],
+    ["Riya Malhotra", "9871234567", "HM-2026-0071", "Anxiety before presentations; Argentum nitricum 30C."],
+    ["Omkar Sawant", "9321155566", "HM-2026-0102", "Recurrent boils; Silicea in progress."],
+    ["Pooja Shetty", "9901977553", "HM-2026-0128", "Hypothyroid, borderline; follow up TSH quarterly."],
+    ["Rajesh Verma", "9711324650", "HM-2026-0144", "Insomnia + acidity pattern; Nux vomica morning dose."],
+    ["Anjali Mishra", "9415677220", "HM-2026-0161", "Seasonal asthma; Arsenicum album 30C when worsening."],
+    ["Sanjay Deshmukh", "9422068911", "HM-2026-0177", "Prostate follow-up; Sabal serrulata mother tincture drops."],
+    ["jkjh", "9313005400", "HM-2026-0178", ""]
+  ];
+
+  /* ---------------------------- helpers ---------------------------- */
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  function uid() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return 'r-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
   }
 
-  // ---------- LOAD FROM SUPABASE ----------
-  async function loadPatients() {
-    const { data, error } = await db.from('patients').select('*').order('id');
-    if (error) {
-      console.error('Load failed:', error);
-      setStatus('⚠ load failed: ' + error.message);
-      return;
+  function nowIso() { return new Date().toISOString(); }
+
+  function readJSON(key) {
+    try {
+      var raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) {
+      return null;
     }
-    patients = data || [];
-    renderPatients(document.getElementById('search').value);
-    setStatus(patients.length + ' patients');
   }
 
-  // ---------- MODAL HELPERS ----------
-  function openAddModal() {
-    document.getElementById('modalTitle').textContent = 'Add New Patient';
-    document.getElementById('saveBtn').textContent = 'Save Patient';
-    document.getElementById('editId').value = '';
-    document.getElementById('patientForm').reset();
-    document.getElementById('patientModal').style.display = 'block';
+  function text(v) { return (v == null ? '' : String(v)); }
+
+  function slug(v) { return text(v).toLowerCase().replace(/[^a-z0-9]/g, ''); }
+  function digits(v) { return text(v).replace(/\D/g, ''); }
+
+  var KNOWN_FIELDS = { uid: 1, name: 1, phone: 1, reg: 1, createdAt: 1, updatedAt: 1, cloudId: 1 };
+
+  /**
+   * Keeps every extra column a record arrived with (age, notes, city, …) in
+   * `meta`, so importing a richer export back never throws information away.
+   */
+  function collectMeta(r) {
+    var meta = null;
+    for (var k in r) {
+      if (KNOWN_FIELDS[k] || k === 'meta') continue;
+      if (r[k] == null || r[k] === '') continue;
+      meta = meta || {};
+      meta[k] = r[k];
+    }
+    if (r.meta && typeof r.meta === 'object') {
+      meta = meta || {};
+      for (var m in r.meta) if (r.meta[m] != null && r.meta[m] !== '') meta[m] = r.meta[m];
+    }
+    return meta;
   }
 
-  function openEditModal(id) {
-    const p = patients.find(x => x.id === id);
-    if (!p) return;
-    document.getElementById('modalTitle').textContent = 'Edit Patient';
-    document.getElementById('saveBtn').textContent = 'Update Patient';
-    document.getElementById('editId').value = id;
-    document.getElementById('nameInput').value = p.name;
-    document.getElementById('phoneInput').value = p.phone;
-    document.getElementById('regInput').value = p.reg;
-    document.getElementById('patientModal').style.display = 'block';
+  function normalizeRow(r, extra) {
+    var reg = text(r.reg).trim();
+
+    // Exports from other tools put the registration number in `id`
+    // (Supabase table editor, this clinic's own registry). A purely
+    // numeric id is a database row id and is left alone.
+    if (!reg && r.id != null && !/^\d+$/.test(text(r.id).trim())) reg = text(r.id).trim();
+
+    var out = {
+      uid: text(r.uid) || uid(),
+      name: text(r.name).trim(),
+      phone: text(r.phone).trim(),
+      reg: reg,
+      createdAt: text(r.createdAt) || nowIso(),
+      updatedAt: text(r.updatedAt) || nowIso()
+    };
+    if (r.cloudId != null) out.cloudId = r.cloudId;
+    var meta = collectMeta(r);
+    if (meta) out.meta = meta;
+    if (extra) for (var k in extra) out[k] = extra[k];
+    return out;
   }
 
-  function closeModal() {
-    document.getElementById('patientModal').style.display = 'none';
+  function isPatient(r) {
+    return r && typeof r === 'object' && (text(r.name) || text(r.phone) || text(r.reg));
   }
 
-  // ---------- RENDER ----------
-  function renderPatients(filter = '') {
-    const tbody = document.querySelector('#patientTable tbody');
-    tbody.innerHTML = '';
+  /* ------------------------ synchronous boot ------------------------ */
 
-    const lower = filter.toLowerCase();
-
-    patients.forEach(p => {
-      const matches = p.name.toLowerCase().includes(lower) ||
-                      p.phone.toLowerCase().includes(lower) ||
-                      p.reg.toLowerCase().includes(lower);
-
-      if (matches) {
-        const tr = document.createElement('tr');
-        tr.innerHTML =
-          `<td>${p.name}</td><td>${p.phone}</td><td>${p.reg}</td>` +
-          `<td>` +
-            `<button class="btn btn-edit row-btn" onclick="openEditModal(${p.id})">Edit</button>` +
-            `<button class="btn btn-delete row-btn" onclick="deletePatient(${p.id})">Delete</button>` +
-          `</td>`;
-        tbody.appendChild(tr);
-      }
+  function legacyToRows(list) {
+    if (!Array.isArray(list)) return [];
+    return list.filter(isPatient).map(function (r) {
+      // Pass the whole record through so extra columns (age, notes, id, …)
+      // land in `meta` instead of being dropped by the import.
+      return normalizeRow(r, r.cloudId != null ? { cloudId: r.cloudId } : null);
     });
   }
 
-  // ---------- SEARCH ----------
-  document.getElementById('search').addEventListener('input', e => {
-    renderPatients(e.target.value);
-  });
-
-  // ---------- ADD / EDIT PATIENT ----------
-  document.getElementById('patientForm').addEventListener('submit', async e => {
-    e.preventDefault();
-
-    const name = document.getElementById('nameInput').value.trim();
-    const phone = document.getElementById('phoneInput').value.trim();
-    const reg = document.getElementById('regInput').value.trim();
-    const editId = document.getElementById('editId').value;
-
-    if (!name || !phone || !reg) return;
-
-    const row = { name, phone, reg };
-
-    if (editId) {
-      const { error } = await db.from('patients').update(row).eq('id', editId);
-      if (error) { setStatus('⚠ update failed: ' + error.message); return; }
-      setStatus('updated');
-    } else {
-      const { error } = await db.from('patients').insert(row);
-      if (error) { setStatus('⚠ insert failed: ' + error.message); return; }
-      setStatus('saved');
-    }
-
-    closeModal();
-    await loadPatients();
-  });
-
-  // ---------- DELETE PATIENT ----------
-  async function deletePatient(id) {
-    const p = patients.find(x => x.id === id);
-    if (!p) return;
-    if (!confirm(`Delete patient "${p.name}"? This cannot be undone.`)) return;
-
-    const { error } = await db.from('patients').delete().eq('id', id);
-    if (error) { setStatus('⚠ delete failed: ' + error.message); return; }
-    setStatus('deleted');
-    await loadPatients();
+  function sanitizeState(raw) {
+    if (!raw || typeof raw !== 'object' || !Array.isArray(raw.rows)) return null;
+    var rows = [];
+    raw.rows.filter(isPatient).forEach(function (r) { rows.push(normalizeRow(r)); });
+    return {
+      version: 2,
+      savedAt: Number(raw.savedAt) || 0,
+      rows: rows,
+      tombstones: (raw.tombstones && typeof raw.tombstones === 'object') ? raw.tombstones : {},
+      cloudLastSync: Number(raw.cloudLastSync) || 0,
+      seeded: !!raw.seeded
+    };
   }
 
-  // ---------- INITIAL LOAD ----------
-  loadPatients();
+  /**
+   * Merge `incoming` rows into `targetRows` without ever dropping a record.
+   * A patient is identified by uid, then registration number, then phone
+   * (name only as a last resort when both are missing), so the same person
+   * arriving from old storage, the second copy, a CSV and the cloud
+   * collapses into one row instead of duplicating.
+   */
+  function mergeRows(targetRows, incomingRows) {
+    var byUid = {};
+    var byReg = {};
+    var byPhone = {};
+    var byName = {};
+
+    function index(r) {
+      byUid[r.uid] = r;
+      var reg = slug(r.reg);
+      var phone = digits(r.phone);
+      var name = slug(r.name);
+      if (reg) byReg[reg] = r;
+      if (phone) byPhone[phone] = r;
+      if (name) byName[name] = r;
+    }
+
+    function absorbMeta(target, meta) {
+      if (!meta) return;
+      target.meta = target.meta || {};
+      for (var k in meta) {
+        if (!(k in target.meta) || target.meta[k] === '') target.meta[k] = meta[k];
+      }
+    }
+
+    targetRows.forEach(index);
+
+    var added = 0;
+
+    incomingRows.forEach(function (candidate) {
+      if (state.tombstones && state.tombstones[candidate.uid]) return;
+
+      var reg = slug(candidate.reg);
+      var phone = digits(candidate.phone);
+      var name = slug(candidate.name);
+
+      var existing = byUid[candidate.uid] || (reg && byReg[reg]) || null;
+
+      // Phone numbers are shared inside families, so a phone match only
+      // counts when the two registration numbers cannot disagree.
+      if (!existing && phone && byPhone[phone]) {
+        var phoneRow = byPhone[phone];
+        var phoneReg = slug(phoneRow.reg);
+        if (!reg || !phoneReg || phoneReg === reg) existing = phoneRow;
+      }
+
+      // Last resort: a record with neither a registration number nor a phone.
+      if (!existing && !reg && !phone && name && byName[name]) existing = byName[name];
+
+      if (!existing) {
+        targetRows.push(candidate);
+        index(candidate);
+        added++;
+        return;
+      }
+
+      absorbMeta(existing, candidate.meta);
+
+      if (candidate.updatedAt > existing.updatedAt) {
+        existing.name = candidate.name || existing.name;
+        existing.phone = candidate.phone || existing.phone;
+        existing.reg = candidate.reg || existing.reg;
+        existing.updatedAt = candidate.updatedAt;
+        if (candidate.cloudId != null) existing.cloudId = candidate.cloudId;
+        index(existing);
+      } else if (existing.cloudId == null && candidate.cloudId != null) {
+        existing.cloudId = candidate.cloudId;
+      }
+
+      // A row imported before this fix may be missing its registration
+      // number while the same patient now has one: repair it in place.
+      if (!existing.reg && candidate.reg) {
+        existing.reg = candidate.reg;
+        index(existing);
+      }
+    });
+
+    return added;
+  }
+
+  function loadFromLocalStorage() {
+    var stored = sanitizeState(readJSON(STATE_KEY));
+    var legacyRaw = readJSON(LEGACY_KEY);
+    var legacy = legacyToRows(legacyRaw);
+
+    if (stored) {
+      state = stored;
+    } else {
+      state = { version: 2, savedAt: 0, rows: [], tombstones: {}, cloudLastSync: 0 };
+    }
+
+    if (legacy.length) {
+      // Keep an untouched copy of the old records the very first time we see them.
+      if (!readJSON(BACKUP_KEY)) {
+        try { localStorage.setItem(BACKUP_KEY, JSON.stringify(legacyRaw)); } catch (e) {}
+        bootNotes.push('Your records from the previous version were found on this device and restored.');
+      }
+      var added = mergeRows(state.rows, legacy);
+      if (added > 0 && stored) {
+        bootNotes.push(added + ' record' + (added === 1 ? '' : 's') + ' recovered from the earlier version of this page.');
+      }
+    }
+  }
+
+  /* ------------------------- persistence -------------------------- */
+
+  var idbPromise = null;
+
+  function idbOpen() {
+    if (idbPromise) return idbPromise;
+    idbPromise = new Promise(function (resolve) {
+      if (!window.indexedDB) return resolve(null);
+      var req;
+      try { req = indexedDB.open(IDB_NAME, 1); } catch (e) { return resolve(null); }
+      req.onupgradeneeded = function () {
+        var db = req.result;
+        if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+      };
+      req.onsuccess = function () { resolve(req.result); };
+      req.onerror = function () { resolve(null); };
+      req.onblocked = function () { resolve(null); };
+    });
+    return idbPromise;
+  }
+
+  function idbGet(key) {
+    return idbOpen().then(function (db) {
+      if (!db) return null;
+      return new Promise(function (resolve) {
+        try {
+          var tx = db.transaction(IDB_STORE, 'readonly');
+          var req = tx.objectStore(IDB_STORE).get(key);
+          req.onsuccess = function () { resolve(req.result || null); };
+          req.onerror = function () { resolve(null); };
+        } catch (e) { resolve(null); }
+      });
+    });
+  }
+
+  function idbSet(key, value) {
+    return idbOpen().then(function (db) {
+      if (!db) return;
+      try {
+        db.transaction(IDB_STORE, 'readwrite').objectStore(IDB_STORE).put(value, key);
+      } catch (e) {}
+    });
+  }
+
+  /**
+   * Writes the state to localStorage (primary), to a second on-device copy
+   * (IndexedDB), and mirrors the legacy key so an older cached page also
+   * keeps working. Every write is attempted independently: one failing
+   * never prevents the others.
+   */
+  function persist() {
+    state.savedAt = Date.now();
+    var failures = 0;
+
+    try {
+      localStorage.setItem(STATE_KEY, JSON.stringify(state));
+    } catch (e) { failures++; }
+
+    try {
+      var plain = state.rows.map(function (r) {
+        return { name: r.name, phone: r.phone, reg: r.reg };
+      });
+      localStorage.setItem(LEGACY_KEY, JSON.stringify(plain));
+    } catch (e) { failures++; }
+
+    // Never let the very first boot write an empty state over a good
+    // second copy that has not been merged in yet.
+    if (hydrated || state.rows.length > 0) idbSet('state', state);
+
+    localSaveFailed = failures === 2;
+    setLocalStatus(failures === 2 ? 'error' : (failures ? 'partial' : 'ok'));
+    if (failures === 2) {
+      showBanner('This browser is refusing to save data (' + storageReason() + '). Use <b>Backup</b> right now and switch to a normal window — private browsing can block storage.', 'warn');
+    }
+  }
+
+  function storageReason() {
+    try {
+      var probe = '__probe' + Date.now();
+      localStorage.setItem(probe, '1');
+      localStorage.removeItem(probe);
+      return 'storage is full';
+    } catch (e) {
+      return 'storage is blocked';
+    }
+  }
+
+  function setLocalStatus(kind) {
+    var el = $('localStatus');
+    var count = state.rows.length;
+    var label = count + ' record' + (count === 1 ? '' : 's');
+    el.className = 'pill';
+    if (localSaveFailed || kind === 'error' || kind === 'partial') {
+      el.className = 'pill bad';
+      el.textContent = '⚠ not saved — backup now';
+      el.title = 'This browser blocked local saving. Export a backup immediately.';
+      return;
+    }
+    el.className = 'pill ok';
+    el.textContent = '✓ saved on this device · ' + label;
+    el.title = 'Last saved ' + new Date().toLocaleString();
+  }
+
+  /* ---------------------------- render ----------------------------- */
+
+  var searchValue = '';
+  var rowsByUid = {};
+
+  function visibleRows() {
+    var q = searchValue.trim().toLowerCase();
+    var list = state.rows.slice().sort(function (a, b) {
+      return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) ||
+             a.reg.localeCompare(b.reg, undefined, { numeric: true });
+    });
+    if (!q) return list;
+    return list.filter(function (r) {
+      return r.name.toLowerCase().indexOf(q) !== -1 ||
+             r.phone.toLowerCase().indexOf(q) !== -1 ||
+             r.reg.toLowerCase().indexOf(q) !== -1;
+    });
+  }
+
+  function render() {
+    var tbody = document.querySelector('#patientTable tbody');
+    var empty = $('emptyState');
+    tbody.textContent = '';
+    rowsByUid = {};
+
+    var list = visibleRows();
+    list.forEach(function (p) {
+      rowsByUid[p.uid] = p;
+
+      var tr = document.createElement('tr');
+
+      [p.name, p.phone, p.reg].forEach(function (value) {
+        var td = document.createElement('td');
+        td.textContent = value;
+        tr.appendChild(td);
+      });
+
+      var actions = document.createElement('td');
+      actions.className = 'actions';
+
+      var edit = document.createElement('button');
+      edit.type = 'button';
+      edit.className = 'btn btn-edit small';
+      edit.textContent = 'Edit';
+      edit.dataset.edit = p.uid;
+      actions.appendChild(edit);
+
+      var del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'btn btn-delete small';
+      del.textContent = 'Delete';
+      del.dataset.delete = p.uid;
+      actions.appendChild(del);
+
+      tr.appendChild(actions);
+      tbody.appendChild(tr);
+    });
+
+    var hasRows = state.rows.length > 0;
+    empty.hidden = !(list.length === 0);
+    empty.textContent = !hasRows
+      ? 'No patients yet. Use “Add Patient” to create the first record.'
+      : 'No patient matches “' + searchValue.trim() + '”.';
+
+    setLocalStatus('ok');
+    renderCloudStatus();
+  }
+
+  function renderCloudStatus() {
+    var el = $('cloudStatus');
+    el.className = 'pill';
+    if (!cloud.enabled) {
+      el.textContent = 'cloud: off · device only';
+      el.title = 'Records are stored on this device. Open “Cloud” to add a shared backup.';
+      return;
+    }
+    if (cloudState === 'syncing') { el.className = 'pill warn'; el.textContent = 'cloud: syncing…'; return; }
+    if (cloudState === 'ok') {
+      el.className = 'pill ok';
+      el.textContent = 'cloud: synced';
+      el.title = state.cloudLastSync ? 'Last sync ' + new Date(state.cloudLastSync).toLocaleString() : 'Synced';
+      return;
+    }
+    el.className = 'pill bad';
+    el.textContent = 'cloud: offline · device safe';
+    el.title = cloudDetail || 'Cloud backup unreachable. Records are still saved on this device.';
+  }
+
+  /* ---------------------------- banner ----------------------------- */
+
+  function showBanner(html, kind) {
+    var b = $('banner');
+    b.innerHTML = html;
+    b.className = 'banner' + (kind === 'info' ? ' info' : '');
+    b.hidden = false;
+    var dismiss = document.createElement('div');
+    dismiss.className = 'row';
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'link';
+    btn.textContent = 'Dismiss';
+    btn.addEventListener('click', function () { b.hidden = true; });
+    dismiss.appendChild(btn);
+    b.appendChild(dismiss);
+  }
+
+  function hideBanner() { $('banner').hidden = true; }
+
+  /* ----------------------------- toast ----------------------------- */
+
+  var toastTimer = null;
+
+  function toast(message, actionLabel, action) {
+    var el = $('toast');
+    el.textContent = '';
+    var span = document.createElement('span');
+    span.textContent = message;
+    el.appendChild(span);
+
+    if (actionLabel && action) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = actionLabel;
+      btn.addEventListener('click', function () {
+        el.classList.remove('show');
+        action();
+      });
+      el.appendChild(btn);
+    }
+
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.classList.remove('show'); }, action ? 9000 : 3500);
+  }
+
+  /* ---------------------------- modals ----------------------------- */
+
+  var lastFocused = null;
+
+  function openModal(id) {
+    lastFocused = document.activeElement;
+    $(id).classList.add('open');
+    var first = $(id).querySelector('input, button');
+    if (first) first.focus();
+  }
+
+  function closeModals() {
+    ['patientModal', 'cloudModal'].forEach(function (id) { $(id).classList.remove('open'); });
+    if (lastFocused && lastFocused.focus) lastFocused.focus();
+  }
+
+  document.addEventListener('click', function (e) {
+    if (e.target.closest('[data-close-modal]')) closeModals();
+    var editBtn = e.target.closest('[data-edit]');
+    if (editBtn) openEditModal(editBtn.dataset.edit);
+    var delBtn = e.target.closest('[data-delete]');
+    if (delBtn) deletePatient(delBtn.dataset.delete);
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeModals();
+  });
+
+  ['patientModal', 'cloudModal'].forEach(function (id) {
+    $(id).addEventListener('mousedown', function (e) {
+      if (e.target === $(id)) closeModals();
+    });
+  });
+
+  /* ------------------------- add / edit ---------------------------- */
+
+  function openAddModal() {
+    $('modalTitle').textContent = 'Add New Patient';
+    $('saveBtn').textContent = 'Save Patient';
+    $('editId').value = '';
+    $('patientForm').reset();
+    openModal('patientModal');
+  }
+
+  function openEditModal(uids) {
+    var p = rowsByUid[uids];
+    if (!p) return;
+    $('modalTitle').textContent = 'Edit Patient';
+    $('saveBtn').textContent = 'Update Patient';
+    $('editId').value = p.uid;
+    $('nameInput').value = p.name;
+    $('phoneInput').value = p.phone;
+    $('regInput').value = p.reg;
+    openModal('patientModal');
+  }
+
+  $('patientForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+
+    var name = $('nameInput').value.trim();
+    var phone = $('phoneInput').value.trim();
+    var reg = $('regInput').value.trim();
+    var editUid = $('editId').value;
+
+    if (!name || !phone || !reg) {
+      toast('Name, phone and registration number are all required.');
+      return;
+    }
+
+    var dup = state.rows.filter(function (r) {
+      return r.uid !== editUid && (slug(r.reg) === slug(reg) || (digits(r.phone) && digits(r.phone) === digits(phone)));
+    });
+
+    if (dup.length) {
+      toast('Another record already uses that registration number or phone (' + dup[0].name + ').');
+      return;
+    }
+
+    var stamp = nowIso();
+
+    if (editUid) {
+      var row = state.rows.filter(function (r) { return r.uid === editUid; })[0];
+      if (!row) return;
+      row.name = name;
+      row.phone = phone;
+      row.reg = reg;
+      row.updatedAt = stamp;
+      toast('Saved changes to ' + name + '.');
+    } else {
+      state.rows.push(normalizeRow({ name: name, phone: phone, reg: reg, createdAt: stamp, updatedAt: stamp }));
+      toast('Added ' + name + '.');
+    }
+
+    persist();
+    render();
+    closeModals();
+    syncCloudSoon();
+  });
+
+  /* ---------------------------- delete ----------------------------- */
+
+  function deletePatient(uids) {
+    var p = rowsByUid[uids];
+    if (!p) return;
+    if (!confirm('Delete patient "' + p.name + '"?')) return;
+
+    var index = state.rows.indexOf(p);
+    state.rows.splice(index, 1);
+    state.tombstones[p.uid] = { at: nowIso(), cloudId: p.cloudId != null ? p.cloudId : null, name: p.name };
+
+    persist();
+    render();
+    syncCloudSoon();
+
+    toast('Deleted ' + p.name + '.', 'Undo', function () {
+      delete state.tombstones[p.uid];
+      state.rows.splice(Math.min(index, state.rows.length), 0, p);
+      persist();
+      render();
+      syncCloudSoon();
+      toast('Restored ' + p.name + '.');
+    });
+  }
+
+  /* ------------------------- backup / restore ---------------------- */
+
+  function exportBackup() {
+    var payload = {
+      app: 'clinic-patient-directory',
+      exportedAt: nowIso(),
+      count: state.rows.length,
+      patients: state.rows.map(function (r) {
+        var row = { name: r.name, phone: r.phone, reg: r.reg };
+        if (r.meta) {
+          for (var k in r.meta) if (!(k in row)) row[k] = r.meta[k];
+        }
+        return row;
+      })
+    };
+    var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    var stamp = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = 'patients-backup-' + stamp + '.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+    toast('Backup downloaded (' + state.rows.length + ' records). Keep this file somewhere safe.');
+  }
+
+  function snapshot() {
+    try {
+      var keys = Object.keys(localStorage).filter(function (k) {
+        return k.indexOf(SNAPSHOT_PREFIX) === 0;
+      }).sort();
+
+      while (keys.length >= MAX_SNAPSHOTS) {
+        localStorage.removeItem(keys.shift());
+      }
+      localStorage.setItem(SNAPSHOT_PREFIX + Date.now(), JSON.stringify(state));
+    } catch (e) {}
+  }
+
+  /* --------------------- CSV (Supabase / Excel) --------------------- */
+
+  /** Small RFC 4180 parser: quoted fields, escaped quotes, CRLF, embedded newlines. */
+  function parseCsv(raw) {
+    var text = raw.replace(/^\uFEFF/, '');
+    var rows = [];
+    var row = [];
+    var field = '';
+    var quoted = false;
+
+    for (var i = 0; i < text.length; i++) {
+      var c = text[i];
+
+      if (quoted) {
+        if (c === '"') {
+          if (text[i + 1] === '"') { field += '"'; i++; }
+          else quoted = false;
+        } else field += c;
+        continue;
+      }
+
+      if (c === '"') { quoted = true; continue; }
+      if (c === ',') { row.push(field); field = ''; continue; }
+      if (c === '\r') continue;
+      if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; continue; }
+      field += c;
+    }
+    if (field.length || row.length) { row.push(field); rows.push(row); }
+    return rows.filter(function (r) { return r.some(function (v) { return String(v).trim() !== ''; }); });
+  }
+
+  function pickColumn(headers, patterns, rejectIf) {
+    for (var p = 0; p < patterns.length; p++) {
+      for (var h = 0; h < headers.length; h++) {
+        if (patterns[p].test(headers[h]) && !(rejectIf && rejectIf(headers[h]))) return h;
+      }
+    }
+    return -1;
+  }
+
+  function csvToRows(raw) {
+    var grid = parseCsv(raw);
+    if (!grid.length) return [];
+
+    var hasHeader = grid[0].some(function (cell) {
+      return /name|phone|reg|mobile|patient/i.test(cell);
+    });
+    if (!hasHeader) return [];
+
+    var headers = grid[0].map(function (h) { return String(h).trim(); });
+    var nameCol = pickColumn(headers, [/^name$/i, /full.?name/i, /patient/i, /name/i]);
+    var phoneCol = pickColumn(headers, [/^phone$/i, /phone|mobile|contact|tel/i]);
+    var regCol = pickColumn(headers, [/^reg$|^reg(istration)?(_?no|_?number)?$/i, /reg/i]);
+    var idCol = pickColumn(headers, [/^id$/i]);
+
+    // A numeric "id" column is a database row id, not a registration number.
+    if (regCol === -1 && idCol !== -1) {
+      var idValues = grid.slice(1).map(function (r) { return String(r[idCol] || '').trim(); });
+      var allNumeric = idValues.every(function (v) { return /^\d+$/.test(v); });
+      if (!allNumeric) regCol = idCol;
+    }
+
+    if (nameCol === -1 || phoneCol === -1 || regCol === -1) return [];
+
+    return grid.slice(1).map(function (cells) {
+      var row = {
+        name: String(cells[nameCol] || '').trim(),
+        phone: String(cells[phoneCol] || '').trim(),
+        reg: String(cells[regCol] || '').trim()
+      };
+      headers.forEach(function (header, index) {
+        if (index === nameCol || index === phoneCol || index === regCol) return;
+        var value = String(cells[index] == null ? '' : cells[index]).trim();
+        if (value) row[header] = value;
+      });
+      return row;
+    }).filter(function (r) { return r.name || r.phone || r.reg; });
+  }
+
+  $('importFile').addEventListener('change', function (e) {
+    var file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+
+    var reader = new FileReader();
+    reader.onload = function () {
+      var content = String(reader.result);
+      var list = null;
+      var fromCsv = /\.csv$/i.test(file.name);
+
+      if (!fromCsv) {
+        try {
+          var parsed = JSON.parse(content);
+          if (Array.isArray(parsed)) list = parsed;
+          else if (parsed && Array.isArray(parsed.patients)) list = parsed.patients;
+          else if (parsed && Array.isArray(parsed.rows)) list = parsed.rows;
+        } catch (err) {
+          fromCsv = true; // JSON failed; the file may simply be comma separated
+        }
+      }
+
+      if (fromCsv) list = csvToRows(content);
+
+      if (!list) {
+        toast('No patient list found. Use a JSON backup from this page, or a CSV with name, phone and registration columns.');
+        return;
+      }
+
+      var incoming = legacyToRows(list);
+      if (!incoming.length) {
+        toast(fromCsv
+          ? 'That CSV needs columns for name, phone and registration number. Found none it could recognise.'
+          : 'That backup contains no patient records.');
+        return;
+      }
+
+      snapshot();
+      var added = mergeRows(state.rows, incoming);
+      persist();
+      render();
+      syncCloudSoon();
+
+      toast('Restored ' + incoming.length + ' record' + (incoming.length === 1 ? '' : 's') +
+            (added ? ' (' + added + ' new)' : ' (all already present)') + '. Nothing was overwritten.');
+    };
+    reader.onerror = function () { toast('Could not read that file.'); };
+    reader.readAsText(file);
+  });
+
+  /* ----------------------------- cloud ----------------------------- */
+
+  function loadCloudSettings() {
+    var saved = readJSON(CLOUD_KEY);
+    if (saved && saved.url) {
+      cloud.url = text(saved.url).replace(/\/+$/, '');
+      cloud.key = text(saved.key);
+      cloud.enabled = !!cloud.key;
+    }
+  }
+
+  function saveCloudSettings() {
+    try {
+      if (cloud.enabled) localStorage.setItem(CLOUD_KEY, JSON.stringify({ url: cloud.url, key: cloud.key }));
+      else localStorage.removeItem(CLOUD_KEY);
+    } catch (e) {}
+  }
+
+  var supabaseLibPromise = null;
+
+  function loadSupabaseLib() {
+    if (window.supabase && window.supabase.createClient) return Promise.resolve(window.supabase);
+    if (supabaseLibPromise) return supabaseLibPromise;
+
+    supabaseLibPromise = new Promise(function (resolve, reject) {
+      var script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+      script.async = true;
+      var timer = setTimeout(function () { reject(new Error('The Supabase library did not load (network blocked).')); }, 12000);
+      script.onload = function () {
+        clearTimeout(timer);
+        if (window.supabase && window.supabase.createClient) resolve(window.supabase);
+        else reject(new Error('The Supabase library failed to initialise.'));
+      };
+      script.onerror = function () {
+        clearTimeout(timer);
+        reject(new Error('The Supabase library could not be downloaded (network or ad-blocker).'));
+      };
+      document.head.appendChild(script);
+    });
+    return supabaseLibPromise;
+  }
+
+  function withTimeout(promise, ms, label) {
+    return new Promise(function (resolve, reject) {
+      var timer = setTimeout(function () { reject(new Error((label || 'Request') + ' timed out.')); }, ms);
+      promise.then(function (v) { clearTimeout(timer); resolve(v); },
+                   function (e) { clearTimeout(timer); reject(e); });
+    });
+  }
+
+  /** Turns low-level fetch/network failures into something a human can act on. */
+  function describeError(err) {
+    var msg = (err && (err.message || err.error_description || err.hint)) || String(err);
+    var code = err && (err.code || (err.status ? 'HTTP ' + err.status : ''));
+
+    if (/Failed to fetch|NetworkError|ENOTFOUND|getaddrinfo|Load failed/i.test(msg)) {
+      return {
+        kind: 'unreachable',
+        text: 'Cannot reach the cloud project at ' + (cloud.url || 'the configured URL') +
+              '. The address does not resolve, so the project was most likely deleted or paused. ' +
+              'Records are still safely saved on this device.'
+      };
+    }
+    if (/permission denied|row-level security|42501/i.test(msg + ' ' + (code || ''))) {
+      return { kind: 'rls', text: 'The cloud project rejected the request (row-level security). Re-run the SQL from the Cloud panel with the full-access policy.' };
+    }
+    if (/relation .* does not exist|42P01/i.test(msg + ' ' + (code || ''))) {
+      return { kind: 'schema', text: 'The "patients" table does not exist in that project. Run the SQL shown in the Cloud panel.' };
+    }
+    if (/Invalid API key|401|jwt/i.test(msg + ' ' + (code || ''))) {
+      return { kind: 'auth', text: 'That key was rejected. Copy the publishable / anon key from the Supabase project settings again.' };
+    }
+    return { kind: 'other', text: msg };
+  }
+
+  function setCloudError(err) {
+    var d = describeError(err);
+    cloudState = 'error';
+    cloudDetail = d.text;
+    renderCloudStatus();
+  }
+
+  function table() {
+    // createClient is cheap; a fresh client keeps retries clean.
+    return window.supabase.createClient(cloud.url, cloud.key, {
+      auth: { persistSession: false, autoRefreshToken: false }
+    }).from('patients');
+  }
+
+  async function syncCloud() {
+    if (!cloud.enabled || !cloud.url || !cloud.key) return;
+    if (cloudState === 'syncing') return;
+
+    cloudState = 'syncing';
+    renderCloudStatus();
+
+    try {
+      await loadSupabaseLib();
+      var q = table();
+
+      var res = await withTimeout(q.select('*').order('id', { ascending: true }), 15000, 'Cloud download');
+      if (res.error) throw res.error;
+
+      var remote = Array.isArray(res.data) ? res.data : [];
+
+      /* 1. Remove records deleted locally while offline. */
+      for (var t in state.tombstones) {
+        var stone = state.tombstones[t];
+        if (stone && stone.cloudId != null) {
+          var delRes = await withTimeout(table().delete().eq('id', stone.cloudId), 15000, 'Cloud delete');
+          if (delRes.error) throw delRes.error;
+          delete state.tombstones[t];
+        }
+      }
+
+      /* 2. Pull anything the cloud knows that this device does not. */
+      var pulled = remote.filter(function (r) {
+        return !state.rows.some(function (l) { return l.cloudId != null && String(l.cloudId) === String(r.id); });
+      }).map(function (r) {
+        return normalizeRow({
+          uid: 'cloud-' + r.id,
+          name: r.name,
+          phone: r.phone,
+          reg: r.reg,
+          createdAt: r.created_at,
+          updatedAt: r.created_at || nowIso()
+        }, { cloudId: r.id });
+      });
+      mergeRows(state.rows, pulled);
+
+      /* 3. Push records the cloud does not have yet. */
+      var pending = state.rows.filter(function (r) { return r.cloudId == null; });
+      for (var i = 0; i < pending.length; i++) {
+        var row = pending[i];
+        var ins = await withTimeout(
+          table().insert({ name: row.name, phone: row.phone, reg: row.reg }).select('id').single(),
+          15000, 'Cloud upload'
+        );
+        if (ins.error) throw ins.error;
+        if (ins.data && ins.data.id != null) row.cloudId = ins.data.id;
+      }
+
+      state.cloudLastSync = Date.now();
+      cloudState = 'ok';
+      cloudDetail = '';
+      persist();
+      renderCloudStatus();
+    } catch (err) {
+      console.error('[cloud sync]', err);
+      setCloudError(err);
+    }
+  }
+
+  var syncTimer = null;
+
+  function syncCloudSoon() {
+    if (!cloud.enabled) return;
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(syncCloud, 400);
+  }
+
+  $('cloudBtn').addEventListener('click', function () {
+    $('cloudUrl').value = cloud.url;
+    $('cloudKey').value = cloud.key;
+    $('cloudTestResult').textContent = '';
+    openModal('cloudModal');
+  });
+
+  $('cloudForm').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    var url = $('cloudUrl').value.trim().replace(/\/+$/, '');
+    var key = $('cloudKey').value.trim();
+    var out = $('cloudTestResult');
+
+    if (!url || !key) {
+      out.textContent = 'Enter both the project URL and the key.';
+      return;
+    }
+    if (!/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(url)) {
+      out.textContent = 'The URL should look like https://yourproject.supabase.co';
+      return;
+    }
+
+    out.textContent = 'Testing…';
+    cloud.url = url;
+    cloud.key = key;
+    cloud.enabled = true;
+
+    try {
+      await loadSupabaseLib();
+      var probe = await withTimeout(
+        fetch(url + '/rest/v1/patients?select=id&limit=1', {
+          headers: { apikey: key, Authorization: 'Bearer ' + key }
+        }),
+        12000, 'Connection test'
+      );
+
+      if (probe.status === 404) throw new Error('project not found');
+      if (probe.status === 401 || probe.status === 403) throw new Error('Invalid API key');
+      if (!probe.ok) throw new Error('HTTP ' + probe.status);
+
+      saveCloudSettings();
+      cloudState = 'ok';
+      out.textContent = 'Connected. Your records are being uploaded.';
+      closeModals();
+      await syncCloud();
+      render();
+      toast('Cloud backup connected.');
+    } catch (err) {
+      var d = describeError(err);
+      cloud.enabled = false;
+      saveCloudSettings();
+      cloudState = 'error';
+      cloudDetail = d.text;
+      renderCloudStatus();
+      out.textContent = d.text;
+    }
+  });
+
+  $('disableCloudBtn').addEventListener('click', function () {
+    cloud.enabled = false;
+    cloud.url = '';
+    cloud.key = '';
+    cloudState = 'off';
+    saveCloudSettings();
+    $('cloudTestResult').textContent = 'Cloud backup is off. Records stay on this device.';
+    renderCloudStatus();
+    toast('Cloud backup turned off. Device storage still active.');
+  });
+
+  /* ------------------------- secondary copy ------------------------ */
+
+  /**
+   * The IndexedDB copy exists so that "clear browsing data" on the
+   * localStorage side never destroys the clinic's records. It is merged,
+   * never replaced, so nothing can be dropped here.
+   */
+  async function recoverFromSecondaryCopy() {
+    var copy = sanitizeState(await idbGet('state'));
+    if (!copy || !copy.rows.length) return false;
+
+    Object.keys(copy.tombstones || {}).forEach(function (k) {
+      if (!state.tombstones[k]) state.tombstones[k] = copy.tombstones[k];
+    });
+
+    var merged = mergeRows(state.rows, copy.rows);
+    if (!state.cloudLastSync) state.cloudLastSync = copy.cloudLastSync || 0;
+
+    return merged > 0;
+  }
+
+  /* ---------------------------- search ----------------------------- */
+
+  $('search').addEventListener('input', function (e) {
+    searchValue = e.target.value;
+    render();
+  });
+
+  $('openAddBtn').addEventListener('click', openAddModal);
+  $('exportBtn').addEventListener('click', exportBackup);
+  $('importBtn').addEventListener('click', function () { $('importFile').click(); });
+
+  /* ------------------------ other tabs / sync ---------------------- */
+
+  window.addEventListener('storage', function (e) {
+    if (e.key === STATE_KEY || e.key === LEGACY_KEY) {
+      var fresh = sanitizeState(readJSON(STATE_KEY));
+      if (fresh) {
+        state = fresh;
+        render();
+      }
+    }
+  });
+
+  window.addEventListener('online', function () {
+    if (cloud.enabled) syncCloud();
+  });
+
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden && cloud.enabled && Date.now() - state.cloudLastSync > 60000) syncCloudSoon();
+  });
+
+  /* ----------------------------- boot ------------------------------ */
+
+  async function boot() {
+    loadFromLocalStorage();
+    render(); // paint whatever the browser already has, immediately
+
+    var recovered = await recoverFromSecondaryCopy();
+    hydrated = true;
+
+    /*
+     * Seed the clinic's saved registry only when this device genuinely has
+     * nothing: no old localStorage records, no second copy, never seeded
+     * before. A device that has real records keeps exactly those, and a
+     * deliberate "delete everything" is never undone by a reseed.
+     */
+    var seeded = 0;
+    if (!state.rows.length && !state.seeded) seeded = seedBuiltIn();
+    else if (state.rows.length) state.seeded = true;
+
+    persist();
+    render();
+
+    if (seeded) {
+      bootNotes.push('Loaded the clinic\'s ' + seeded + ' saved patients onto this device.');
+    }
+    if (recovered) {
+      bootNotes.push('Records recovered from the second on-device copy after browser storage was cleared.');
+    }
+
+    if (bootNotes.length) {
+      showBanner('<b>' + bootNotes.join(' ') + '</b> Everything is saved on this device. Use <b>Backup</b> to keep a copy you can restore on any computer, and <b>Restore</b> to merge any older records.', 'info');
+    } else if (!state.rows.length) {
+      showBanner('No records are stored on this device yet. If the clinic used the old cloud database, that project no longer exists — open <b>Cloud</b> to attach a working one, or use <b>Restore</b> with a backup file. Anything you add now is saved here immediately.', 'warn');
+    }
+
+    loadCloudSettings();
+    if (cloud.enabled) syncCloud();
+  }
+
+  function seedBuiltIn() {
+    if (!BUILT_IN_REGISTRY.length) return 0;
+    var rows = BUILT_IN_REGISTRY.map(function (p) {
+      return normalizeRow({ name: p[0], phone: p[1], reg: p[2], notes: p[3] || '' });
+    });
+    var added = mergeRows(state.rows, rows);
+    state.seeded = true;
+    return added;
+  }
+
+  boot();
+})();
 </script>
 
 </body>

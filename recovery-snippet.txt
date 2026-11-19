@@ -1,0 +1,67 @@
+HOW TO GET THE CLINIC'S EXISTING RECORDS OFF A COMPUTER
+=======================================================
+
+Do this on the computer and in the browser the clinic actually used to
+enter patients. Nothing is uploaded anywhere; you just copy text out.
+
+STEP 1 - Open the clinic link in that browser
+---------------------------------------------
+Use the exact same address that was used before, for example
+https://clinic-ochre-seven.vercel.app
+(If a Vercel "preview" address was used, open that one instead.)
+
+STEP 2 - Open the browser console
+---------------------------------
+Windows / Linux:  press F12, then click the "Console" tab
+                  (or Ctrl + Shift + J)
+Mac:              Cmd + Option + J
+
+STEP 3 - Paste this and press Enter
+-----------------------------------
+copy(JSON.stringify({patients: (() => {
+  const read = (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } };
+  const legacy = read('patients') || [];
+  const state = read('clinic_state_v2');
+  const backup = read('patients_backup_v1') || [];
+  const seen = new Map();
+  [].concat(
+    Array.isArray(legacy) ? legacy : [],
+    (state && Array.isArray(state.rows)) ? state.rows : [],
+    Array.isArray(backup) ? backup : []
+  ).filter(p => p && (p.name || p.phone || p.reg)).forEach(p => {
+    const row = Object.assign({ name: p.name || '', phone: p.phone || '', reg: p.reg || '' }, p.meta || {});
+    const k = (row.reg || '').toLowerCase().replace(/[^a-z0-9]/g, '') || (row.phone || '').replace(/\D/g, '') || row.name.toLowerCase();
+    if (!seen.has(k)) seen.set(k, row);
+  });
+  return Array.from(seen.values());
+})()}, null, 2))
+
+If `copy` is not defined in that browser, run the same thing without the
+`copy(...)` wrapper and copy the printed text by hand.
+
+STEP 4 - Save it
+----------------
+Paste into Notepad (or any text editor) and save as
+    patients-old.json
+
+STEP 5 - Load it into the fixed page
+------------------------------------
+Open the new Patient Directory page, press "Restore", and choose
+patients-old.json. It merges; it never overwrites or deletes anything.
+Check the number in the green pill afterwards.
+
+If STEP 3 gives `{"patients":[]}`, that browser has no saved records -
+try the other browser(s) on that computer, or the other computer used at
+the clinic. If every browser is empty, the records were never stored in
+a browser, and the only remaining source is a Supabase project backup
+(Supabase dashboard -> project -> Backups), which needs access to the
+account that owned the project.
+
+
+CHECKING THIS DEVELOPMENT MACHINE (already done)
+------------------------------------------------
+Scanned: Chrome, Brave and Edge profiles (Default + Profile N),
+localStorage, IndexedDB and session storage, looking for
+`clinic-ochre`, the Supabase project ref, and `patients` keys.
+
+Result: no patient records for that site exist on this machine.
