@@ -93,6 +93,57 @@ every record is never undone by a reseed.
 | Backup / Restore buttons | One-click JSON backup, merge-only restore that never overwrites |
 | Restore reads JSON **and CSV**, and keeps every extra column | A Supabase table export or an Excel/Sheets file can be loaded directly |
 | Delete has Undo | A mis-click cannot lose a patient |
+| Every save is pushed to an **append-only** server backup | The owner keeps every version; the device cannot erase server history |
+| A local append-only history keeps the last 300 versions in IndexedDB | Even a cleared browser can be rolled back |
+
+## Automatic owner-side backup (append-only)
+
+The page now posts a snapshot to `/api/backup` on every change. The endpoint
+(`api/backup.js`, a Vercel function) writes that snapshot as a **new file** in a
+private GitHub repository that the clinic owner controls. There is no delete or
+overwrite route, so:
+
+- Every add, edit, delete and restore becomes an immutable snapshot file.
+- Deleting a patient in the page only writes a newer snapshot; the older ones
+  stay in the repository history forever.
+- The browser never receives the GitHub token, so the person using the page
+  cannot delete or rewrite the backup.
+- A wiped browser, a new computer, or the clinic's other device automatically
+  pulls the newest snapshot on load and merges it in.
+
+On-device there is a second safety net: an append-only history in IndexedDB
+(last 300 versions). The ordinary `localStorage` state is replaced on each
+save; this history is not.
+
+### One-time setup (owner only)
+
+1. Create a **private** GitHub repository for the backups, e.g.
+   `viratcore01/clinic-data`.
+2. Create a **fine-grained** GitHub token with **Contents: Read and write** on
+   that repository only.
+3. In the Vercel project → **Settings → Environment Variables**, add:
+   - `GITHUB_TOKEN` = the token
+   - `BACKUP_REPO` = `viratcore01/clinic-data`
+   - (optional) `BACKUP_BRANCH`, `BACKUP_PATH` (default `snapshots`)
+4. Redeploy. The header pill changes from `backup: server not set up` to
+   `backup: saved <time>`.
+
+Until step 3 is done the page still works exactly as before (device-first); it
+just shows `backup: server not set up` and retries automatically once the
+variables exist.
+
+### Restoring a specific version
+
+Every snapshot is a readable JSON file in the backup repository. Open the
+repository on GitHub and download the snapshot you want, then press
+**Restore** in the page — restore merges and never overwrites. To pull the
+newest one automatically, clear the device's site data and open the page again.
+
+> **What the client can and cannot do.** She can add, edit or delete records in
+> the page, and she can clear her browser. She cannot delete the snapshots on
+> the server, because the page has no delete capability for them and never sees
+> the token. If she deletes a patient, you still have every earlier snapshot and
+> can restore it.
 
 Records are matched on registration number, then phone, then name, so nothing is duplicated when the
 old data, the second copy and the cloud copy are merged.

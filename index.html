@@ -128,6 +128,7 @@
   </div>
   <div class="pills">
     <span id="localStatus" class="pill">loading…</span>
+    <span id="backupStatus" class="pill">backup: …</span>
     <span id="cloudStatus" class="pill">cloud: not set up</span>
   </div>
 </header>
@@ -252,7 +253,18 @@ create policy "clinic full access" on patients
   var CLOUD_KEY = 'clinic_cloud_v1';
   var IDB_NAME = 'clinic-directory';
   var IDB_STORE = 'kv';
+  var IDB_HISTORY = 'history';
   var MAX_SNAPSHOTS = 5;
+
+  /*
+   * Append-only server backup. The page posts every save here; the server
+   * stores immutable snapshots and can hand the newest one back to a fresh
+   * or wiped device. The page can never delete server history.
+   */
+  var BACKUP_API = '/api/backup';
+  var BACKUP_HASH_KEY = 'clinic_backup_hash_v1';
+  var BACKUP_AT_KEY = 'clinic_backup_at_v1';
+  var BACKUP_PENDING_KEY = 'clinic_backup_pending_v1';
 
   var state = { version: 2, savedAt: 0, rows: [], tombstones: {}, cloudLastSync: 0, seeded: false };
   var cloud = { url: '', key: '', enabled: false };
@@ -261,6 +273,14 @@ create policy "clinic full access" on patients
   var cloudDetail = '';
   var localSaveFailed = false;
   var hydrated = false;
+
+  /* Append-only server backup state */
+  var lastSavedSignature = '';
+  var lastBackupHash = '';
+  var backupTimer = null;
+  var backupInFlight = false;
+  var backupState = 'off'; // off | pending | ok | error | unconfigured
+  var backupDetail = '';
 
   /**
    * The clinic's registry as it was saved on the clinic server, so a fresh
@@ -565,10 +585,13 @@ create policy "clinic full access" on patients
     idbPromise = new Promise(function (resolve) {
       if (!window.indexedDB) return resolve(null);
       var req;
-      try { req = indexedDB.open(IDB_NAME, 1); } catch (e) { return resolve(null); }
+      try { req = indexedDB.open(IDB_NAME, 2); } catch (e) { return resolve(null); }
       req.onupgradeneeded = function () {
         var db = req.result;
         if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+        if (!db.objectStoreNames.contains(IDB_HISTORY)) {
+          db.createObjectStore(IDB_HISTORY, { autoIncrement: true });
+        }
       };
       req.onsuccess = function () { resolve(req.result); };
       req.onerror = function () { resolve(null); };
@@ -601,6 +624,55 @@ create policy "clinic full access" on patients
   }
 
   /**
+   * Append the current registry to an on-device, append-only history every
+   * time it changes. This is the "even if the browser is cleared" copy: the
+   * normal `state` key is replaced on every save, this one is never replaced.
+   * Old versions are dropped only after the history grows past 300 entries.
+   */
+  function idbHistoryAdd(snap) {
+    return idbOpen().then(function (db) {
+      if (!db || !db.objectStoreNames.contains(IDB_HISTORY)) return;
+      try {
+        var tx = db.transaction(IDB_HISTORY, 'readwrite');
+        var store = tx.objectStore(IDB_HISTORY);
+        store.add({
+          at: Date.now(),
+          count: snap.rows.length,
+          rows: snap.rows,
+          tombstones: snap.tombstones || {},
+          seeded: !!snap.seeded
+        });
+        var countReq = store.count();
+        countReq.onsuccess = function () {
+          if (countReq.result <= 300) return;
+          var drop = countReq.result - 300;
+          var cursorReq = store.openCursor();
+          cursorReq.onsuccess = function () {
+            var cursor = cursorReq.result;
+            if (!cursor || drop <= 0) return;
+            cursor.delete();
+            drop--;
+            cursor.continue();
+          };
+        };
+      } catch (e) {}
+    });
+  }
+
+  function idbHistoryGetAll() {
+    return idbOpen().then(function (db) {
+      if (!db || !db.objectStoreNames.contains(IDB_HISTORY)) return [];
+      return new Promise(function (resolve) {
+        try {
+          var req = db.transaction(IDB_HISTORY, 'readonly').objectStore(IDB_HISTORY).getAll();
+          req.onsuccess = function () { resolve(req.result || []); };
+          req.onerror = function () { resolve([]); };
+        } catch (e) { resolve([]); }
+      });
+    });
+  }
+
+  /**
    * Writes the state to localStorage (primary), to a second on-device copy
    * (IndexedDB), and mirrors the legacy key so an older cached page also
    * keeps working. Every write is attempted independently: one failing
@@ -624,6 +696,16 @@ create policy "clinic full access" on patients
     // Never let the very first boot write an empty state over a good
     // second copy that has not been merged in yet.
     if (hydrated || state.rows.length > 0) idbSet('state', state);
+
+    // Append-only history + server backup, only when something changed.
+    var signature = JSON.stringify(state.rows);
+    if (signature !== lastSavedSignature) {
+      lastSavedSignature = signature;
+      if (hydrated) {
+        idbHistoryAdd(state);
+        scheduleBackup();
+      }
+    }
 
     localSaveFailed = failures === 2;
     setLocalStatus(failures === 2 ? 'error' : (failures ? 'partial' : 'ok'));
@@ -972,6 +1054,150 @@ create policy "clinic full access" on patients
       }
       localStorage.setItem(SNAPSHOT_PREFIX + Date.now(), JSON.stringify(state));
     } catch (e) {}
+  }
+
+  /* ---------------------- append-only server backup ---------------- */
+
+  function backupHash(text) {
+    var h = 5381;
+    for (var i = 0; i < text.length; i++) h = ((h << 5) + h) ^ text.charCodeAt(i);
+    return (h >>> 0).toString(36);
+  }
+
+  function backupPayload() {
+    return {
+      app: 'clinic-patient-directory',
+      version: 2,
+      takenAt: nowIso(),
+      origin: (location && location.origin) || '',
+      count: state.rows.length,
+      rows: state.rows,
+      tombstones: state.tombstones || {},
+      seeded: !!state.seeded
+    };
+  }
+
+  function renderBackupStatus() {
+    var el = $('backupStatus');
+    if (!el) return;
+    el.className = 'pill';
+    if (backupState === 'ok') {
+      var at = Number(localStorage.getItem(BACKUP_AT_KEY)) || state.cloudLastSync;
+      el.className = 'pill ok';
+      el.textContent = 'backup: saved' + (at ? ' ' + new Date(at).toLocaleTimeString() : '');
+      el.title = 'Every save is stored as an immutable snapshot on the clinic owner\'s server.' + (backupDetail ? '\n' + backupDetail : '');
+      return;
+    }
+    if (backupState === 'pending') {
+      el.className = 'pill warn';
+      el.textContent = 'backup: saving…';
+      el.title = 'Sending this save to the owner\'s server backup. It retries automatically.';
+      return;
+    }
+    if (backupState === 'unconfigured') {
+      el.className = 'pill warn';
+      el.textContent = 'backup: server not set up';
+      el.title = 'The backup endpoint exists but GITHUB_TOKEN / BACKUP_REPO are not set in Vercel yet.';
+      return;
+    }
+    if (backupState === 'error') {
+      el.className = 'pill bad';
+      el.textContent = 'backup: retrying';
+      el.title = 'Server backup unreachable. Records are still safe on this device and retry automatically.' + (backupDetail ? '\n' + backupDetail : '');
+      return;
+    }
+    el.textContent = 'backup: off';
+    el.title = 'Server backup is not active yet.';
+  }
+
+  function scheduleBackup(delay) {
+    clearTimeout(backupTimer);
+    backupTimer = setTimeout(function () {
+      pushBackup(false);
+    }, typeof delay === 'number' ? delay : 1200);
+  }
+
+  function pushBackup(force) {
+    if (backupInFlight) { scheduleBackup(2500); return; }
+    if (!navigator.onLine) {
+      backupState = 'pending';
+      try { localStorage.setItem(BACKUP_PENDING_KEY, '1'); } catch (e) {}
+      renderBackupStatus();
+      return;
+    }
+
+    var payload = backupPayload();
+    var body = JSON.stringify(payload);
+    var hash = backupHash(body);
+    if (!force && hash === lastBackupHash) return;
+
+    backupInFlight = true;
+    backupState = 'pending';
+    renderBackupStatus();
+
+    fetch(BACKUP_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: body,
+      cache: 'no-store'
+    }).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (data) {
+        return { res: res, data: data };
+      });
+    }).then(function (out) {
+      if (out.res.status === 503) {
+        backupState = 'unconfigured';
+        backupDetail = out.data && out.data.error || '';
+        return;
+      }
+      if (!out.res.ok) throw new Error((out.data && out.data.error) || ('HTTP ' + out.res.status));
+      lastBackupHash = hash;
+      try {
+        localStorage.setItem(BACKUP_HASH_KEY, hash);
+        localStorage.setItem(BACKUP_AT_KEY, String(Date.now()));
+        localStorage.removeItem(BACKUP_PENDING_KEY);
+      } catch (e) {}
+      backupState = 'ok';
+      backupDetail = out.data && out.data.path || '';
+    }).catch(function (err) {
+      backupState = 'error';
+      backupDetail = String(err && err.message || err);
+      try { localStorage.setItem(BACKUP_PENDING_KEY, '1'); } catch (e) {}
+      scheduleBackup(15000);
+    }).then(function () {
+      backupInFlight = false;
+      renderBackupStatus();
+    });
+  }
+
+  /** Pull the newest owner-side snapshot and merge it in. Never overwrites. */
+  function pullBackup() {
+    return fetch(BACKUP_API + '?t=' + Date.now(), { cache: 'no-store' })
+      .then(function (res) {
+        if (res.status === 503) {
+          backupState = 'unconfigured';
+          renderBackupStatus();
+          return 0;
+        }
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json().then(function (data) {
+          var snap = data && data.snapshot;
+          if (!snap || !Array.isArray(snap.rows)) { renderBackupStatus(); return 0; }
+          var rows = snap.rows.filter(isPatient).map(function (r) { return normalizeRow(r); });
+          var added = mergeRows(state.rows, rows);
+          backupState = 'ok';
+          backupDetail = data.path || '';
+          try { localStorage.setItem(BACKUP_AT_KEY, String(Date.now())); } catch (e) {}
+          renderBackupStatus();
+          return added;
+        });
+      })
+      .catch(function (err) {
+        backupState = 'error';
+        backupDetail = String(err && err.message || err);
+        renderBackupStatus();
+        return 0;
+      });
   }
 
   /* --------------------- CSV (Supabase / Excel) --------------------- */
@@ -1379,11 +1605,14 @@ create policy "clinic full access" on patients
   });
 
   window.addEventListener('online', function () {
+    if (backupState === 'error' || backupState === 'pending') pushBackup(true);
     if (cloud.enabled) syncCloud();
   });
 
   document.addEventListener('visibilitychange', function () {
-    if (!document.hidden && cloud.enabled && Date.now() - state.cloudLastSync > 60000) syncCloudSoon();
+    if (document.hidden) return;
+    if (backupState === 'error' || backupState === 'pending') pushBackup(true);
+    if (cloud.enabled && Date.now() - state.cloudLastSync > 60000) syncCloudSoon();
   });
 
   /* ----------------------------- boot ------------------------------ */
@@ -1408,6 +1637,18 @@ create policy "clinic full access" on patients
     persist();
     render();
 
+    // Restore anything the owner-side backup already knows that this device
+    // does not (new computer, cleared browser, or the clinic's other device).
+    lastBackupHash = (function () {
+      try { return localStorage.getItem(BACKUP_HASH_KEY) || ''; } catch (e) { return ''; }
+    })();
+    var backedUp = await pullBackup();
+    if (backedUp) {
+      bootNotes.push(backedUp + ' record' + (backedUp === 1 ? '' : 's') + ' restored from the server backup.');
+      persist();
+      render();
+    }
+
     if (seeded) {
       bootNotes.push('Loaded the clinic\'s ' + seeded + ' saved patients onto this device.');
     }
@@ -1416,10 +1657,13 @@ create policy "clinic full access" on patients
     }
 
     if (bootNotes.length) {
-      showBanner('<b>' + bootNotes.join(' ') + '</b> Everything is saved on this device. Use <b>Backup</b> to keep a copy you can restore on any computer, and <b>Restore</b> to merge any older records.', 'info');
+      showBanner('<b>' + bootNotes.join(' ') + '</b> Everything is saved on this device and, automatically, on the clinic owner\'s server backup.', 'info');
     } else if (!state.rows.length) {
-      showBanner('No records are stored on this device yet. If the clinic used the old cloud database, that project no longer exists — open <b>Cloud</b> to attach a working one, or use <b>Restore</b> with a backup file. Anything you add now is saved here immediately.', 'warn');
+      showBanner('No records are stored on this device yet. If the clinic used the old cloud database, that project no longer exists — anything you add now is saved here immediately and backed up to the owner\'s server.', 'warn');
     }
+
+    // Push the current registry once (idempotent) so the server has it too.
+    scheduleBackup(400);
 
     loadCloudSettings();
     if (cloud.enabled) syncCloud();
