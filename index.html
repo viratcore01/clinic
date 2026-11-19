@@ -535,10 +535,9 @@ create policy "clinic full access" on patients
       // Keep an untouched copy of the old records the very first time we see them.
       if (!readJSON(BACKUP_KEY)) {
         try { localStorage.setItem(BACKUP_KEY, JSON.stringify(legacyRaw)); } catch (e) {}
-        bootNotes.push('Your records from the previous version were found on this device and restored.');
       }
       var added = mergeRows(state.rows, legacy);
-      if (added > 0 && stored) {
+      if (added > 0) {
         bootNotes.push(added + ' record' + (added === 1 ? '' : 's') + ' recovered from the earlier version of this page.');
       }
     }
