@@ -113,6 +113,11 @@
   #toast.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
   #toast button { background: none; border: none; color: #8fd0ff; font-weight: 700; cursor: pointer; font-size: .85rem; }
   .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .backup-row { display: flex; gap: .5rem; align-items: center; padding: .45rem 0; border-bottom: 1px solid var(--line); font-size: .85rem; }
+  .backup-row:last-child { border-bottom: none; }
+  .backup-row span { flex: 1; min-width: 0; }
+  .backup-row .btn.small { flex: 0 0 auto; }
+
   @media (max-width: 620px) {
     th:nth-child(4), td:nth-child(4) { display: none; }
     body { padding: 1.1rem .75rem 3rem; }
@@ -226,6 +231,22 @@ create policy "clinic full access" on patients
   </div>
 </div>
 
+<!-- Backups -->
+<div id="backupModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="backupTitle">
+  <div class="modal-content">
+    <button class="close" type="button" data-close-modal aria-label="Close">&times;</button>
+    <h2 id="backupTitle">Backups</h2>
+    <div id="backupSummary"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn" id="downloadNowBtn">Download backup now</button>
+    </div>
+    <h2 style="font-size:.95rem;margin:1.2rem 0 .3rem">Automatic copies on this device</h2>
+    <p class="hint" style="margin-top:0">A copy is kept every time a record changes. Restoring one only adds
+      missing records — it never deletes or overwrites anything.</p>
+    <div id="historyList"></div>
+  </div>
+</div>
+
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script>
@@ -265,6 +286,7 @@ create policy "clinic full access" on patients
   var BACKUP_HASH_KEY = 'clinic_backup_hash_v1';
   var BACKUP_AT_KEY = 'clinic_backup_at_v1';
   var BACKUP_PENDING_KEY = 'clinic_backup_pending_v1';
+  var MANUAL_AT_KEY = 'clinic_manual_backup_at_v1';
 
   var state = { version: 2, savedAt: 0, rows: [], tombstones: {}, cloudLastSync: 0, seeded: false };
   var cloud = { url: '', key: '', enabled: false };
@@ -402,7 +424,13 @@ create policy "clinic full access" on patients
     return list.filter(isPatient).map(function (r) {
       // Pass the whole record through so extra columns (age, notes, id, …)
       // land in `meta` instead of being dropped by the import.
-      return normalizeRow(r, r.cloudId != null ? { cloudId: r.cloudId } : null);
+      //
+      // Legacy rows carry no timestamp. Giving them "now" made every page
+      // load look like an edit of every patient, which appended a duplicate
+      // history version each time. An empty timestamp never wins a merge.
+      var extra = { updatedAt: text(r.updatedAt) || text(r.createdAt) || '' };
+      if (r.cloudId != null) extra.cloudId = r.cloudId;
+      return normalizeRow(r, extra);
     });
   }
 
@@ -635,24 +663,34 @@ create policy "clinic full access" on patients
       try {
         var tx = db.transaction(IDB_HISTORY, 'readwrite');
         var store = tx.objectStore(IDB_HISTORY);
-        store.add({
-          at: Date.now(),
-          count: snap.rows.length,
-          rows: snap.rows,
-          tombstones: snap.tombstones || {},
-          seeded: !!snap.seeded
-        });
-        var countReq = store.count();
-        countReq.onsuccess = function () {
-          if (countReq.result <= 300) return;
-          var drop = countReq.result - 300;
-          var cursorReq = store.openCursor();
-          cursorReq.onsuccess = function () {
-            var cursor = cursorReq.result;
-            if (!cursor || drop <= 0) return;
-            cursor.delete();
-            drop--;
-            cursor.continue();
+
+        // A page reload with no change must not create a version: otherwise
+        // idle reloads fill the 300 slots and push real restore points out.
+        var prevReq = store.openCursor(null, 'prev');
+        prevReq.onsuccess = function () {
+          var prev = prevReq.result && prevReq.result.value;
+          if (prev && JSON.stringify(prev.rows) === JSON.stringify(snap.rows)) return;
+
+          store.add({
+            at: Date.now(),
+            count: snap.rows.length,
+            rows: snap.rows,
+            tombstones: snap.tombstones || {},
+            seeded: !!snap.seeded
+          });
+
+          var countReq = store.count();
+          countReq.onsuccess = function () {
+            if (countReq.result <= 300) return;
+            var drop = countReq.result - 300;
+            var cursorReq = store.openCursor();
+            cursorReq.onsuccess = function () {
+              var cursor = cursorReq.result;
+              if (!cursor || drop <= 0) return;
+              cursor.delete();
+              drop--;
+              cursor.continue();
+            };
           };
         };
       } catch (e) {}
@@ -687,10 +725,11 @@ create policy "clinic full access" on patients
     } catch (e) { failures++; }
 
     try {
-      var plain = state.rows.map(function (r) {
-        return { name: r.name, phone: r.phone, reg: r.reg };
-      });
-      localStorage.setItem(LEGACY_KEY, JSON.stringify(plain));
+      // Keep the full rows (including timestamps) in the legacy key. Stripping
+      // them made the next boot re-merge them as if every record had just
+      // been edited. Older cached pages only read name/phone/reg and ignore
+      // the extra fields.
+      localStorage.setItem(LEGACY_KEY, JSON.stringify(state.rows));
     } catch (e) { failures++; }
 
     // Never let the very first boot write an empty state over a good
@@ -898,7 +937,7 @@ create policy "clinic full access" on patients
   }
 
   function closeModals() {
-    ['patientModal', 'cloudModal'].forEach(function (id) { $(id).classList.remove('open'); });
+    ['patientModal', 'cloudModal', 'backupModal'].forEach(function (id) { $(id).classList.remove('open'); });
     if (lastFocused && lastFocused.focus) lastFocused.focus();
   }
 
@@ -914,7 +953,7 @@ create policy "clinic full access" on patients
     if (e.key === 'Escape') closeModals();
   });
 
-  ['patientModal', 'cloudModal'].forEach(function (id) {
+  ['patientModal', 'cloudModal', 'backupModal'].forEach(function (id) {
     $(id).addEventListener('mousedown', function (e) {
       if (e.target === $(id)) closeModals();
     });
@@ -1017,30 +1056,151 @@ create policy "clinic full access" on patients
 
   /* ------------------------- backup / restore ---------------------- */
 
-  function exportBackup() {
-    var payload = {
+  /** Full-fidelity backup: uid, notes and every extra column survive a restore. */
+  function backupText(rows, tombstones, seeded, at) {
+    return JSON.stringify({
       app: 'clinic-patient-directory',
-      exportedAt: nowIso(),
-      count: state.rows.length,
-      patients: state.rows.map(function (r) {
-        var row = { name: r.name, phone: r.phone, reg: r.reg };
-        if (r.meta) {
-          for (var k in r.meta) if (!(k in row)) row[k] = r.meta[k];
-        }
-        return row;
-      })
-    };
-    var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      version: 2,
+      exportedAt: at || nowIso(),
+      count: rows.length,
+      rows: rows,
+      tombstones: tombstones || {},
+      seeded: !!seeded
+    }, null, 2);
+  }
+
+  function stampName(prefix) {
+    var d = new Date();
+    var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+    return prefix + d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+      '_' + pad(d.getHours()) + pad(d.getMinutes()) + '.json';
+  }
+
+  function downloadText(text, name) {
+    var blob = new Blob([text], { type: 'application/json' });
     var url = URL.createObjectURL(blob);
     var a = document.createElement('a');
-    var stamp = new Date().toISOString().slice(0, 10);
     a.href = url;
-    a.download = 'patients-backup-' + stamp + '.json';
+    a.download = name;
     document.body.appendChild(a);
     a.click();
     a.remove();
     setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
-    toast('Backup downloaded (' + state.rows.length + ' records). Keep this file somewhere safe.');
+  }
+
+  function exportBackup() {
+    var text = backupText(state.rows, state.tombstones, state.seeded);
+
+    // Verify the file really contains every record before claiming success.
+    var parsed = null;
+    try { parsed = JSON.parse(text); } catch (e) { parsed = null; }
+    if (!parsed || parsed.count !== state.rows.length || !Array.isArray(parsed.rows) || parsed.rows.length !== state.rows.length) {
+      toast('Backup check failed, so nothing was downloaded. Try again before making changes.');
+      return;
+    }
+
+    downloadText(text, stampName('patients-backup-'));
+    try { localStorage.setItem(MANUAL_AT_KEY, String(Date.now())); } catch (e) {}
+    toast('Backup verified: ' + state.rows.length + ' records downloaded. Keep the file somewhere safe.');
+    renderBackupPanel();
+  }
+
+  function lastManualBackupAt() {
+    try { return Number(localStorage.getItem(MANUAL_AT_KEY)) || 0; } catch (e) { return 0; }
+  }
+
+  function backupAgeText(at) {
+    if (!at) return 'never';
+    var days = Math.floor((Date.now() - at) / 86400000);
+    if (days <= 0) return 'today';
+    if (days === 1) return 'yesterday';
+    return days + ' days ago';
+  }
+
+  function renderBackupPanel() {
+    var summary = $('backupSummary');
+    if (!summary) return;
+    summary.textContent = '';
+
+    var at = lastManualBackupAt();
+    var line = document.createElement('p');
+    line.className = 'hint';
+    line.textContent = 'Last downloaded backup: ' + (at ? new Date(at).toLocaleString() : 'never') +
+      ' (' + backupAgeText(at) + '). Records on this device: ' + state.rows.length + '.';
+    summary.appendChild(line);
+
+    var server = document.createElement('p');
+    server.className = 'hint';
+    server.textContent = (backupState === 'ok')
+      ? 'Owner server copy: active.'
+      : 'Owner server copy: NOT active, so a downloaded file is the only copy that survives losing this device.';
+    summary.appendChild(server);
+
+    var list = $('historyList');
+    if (!list) return;
+    list.textContent = 'Loading…';
+
+    idbHistoryGetAll().then(function (versions) {
+      versions.sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
+      list.textContent = '';
+
+      if (!versions.length) {
+        list.textContent = 'No automatic copies yet. One is made every time a patient is added, edited or deleted.';
+        return;
+      }
+
+      var head = document.createElement('p');
+      head.className = 'hint';
+      head.textContent = versions.length + ' automatic copies kept on this device (newest first).';
+      list.appendChild(head);
+
+      versions.slice(0, 15).forEach(function (v) {
+        var row = document.createElement('div');
+        row.className = 'backup-row';
+
+        var label = document.createElement('span');
+        label.textContent = new Date(v.at).toLocaleString() + ' · ' + (v.rows || []).length + ' records';
+
+        var dl = document.createElement('button');
+        dl.type = 'button';
+        dl.className = 'btn ghost small';
+        dl.textContent = 'Download';
+        dl.addEventListener('click', function () {
+          downloadText(backupText(v.rows || [], v.tombstones, v.seeded, new Date(v.at).toISOString()), stampName('patients-version-'));
+        });
+
+        var restore = document.createElement('button');
+        restore.type = 'button';
+        restore.className = 'btn ghost small';
+        restore.textContent = 'Restore';
+        restore.addEventListener('click', function () { restoreSnapshot(v); });
+
+        row.appendChild(label);
+        row.appendChild(dl);
+        row.appendChild(restore);
+        list.appendChild(row);
+      });
+    });
+  }
+
+  function restoreSnapshot(v) {
+    var rows = (v.rows || []).filter(isPatient).map(function (r) { return normalizeRow(r); });
+    if (!rows.length) { toast('That copy has no patient records.'); return; }
+    if (!confirm('Restore ' + rows.length + ' records from ' + new Date(v.at).toLocaleString() +
+                 '?\n\nThis only adds missing records. Nothing is deleted or overwritten.')) return;
+
+    rows.forEach(function (r) { if (state.tombstones[r.uid]) delete state.tombstones[r.uid]; });
+    var added = mergeRows(state.rows, rows);
+    persist();
+    render();
+    renderBackupPanel();
+    toast('Restored ' + added + ' missing record' + (added === 1 ? '' : 's') +
+          '. ' + (rows.length - added) + ' were already present.');
+  }
+
+  function openBackupModal() {
+    renderBackupPanel();
+    openModal('backupModal');
   }
 
   function snapshot() {
@@ -1315,6 +1475,12 @@ create policy "clinic full access" on patients
       }
 
       var incoming = legacyToRows(list);
+
+      // Restoring is an explicit decision to bring records back. Without this,
+      // the tombstone left by an earlier delete silently blocks the restore
+      // and the page says "all already present" while the record stays gone.
+      incoming.forEach(function (r) { if (state.tombstones[r.uid]) delete state.tombstones[r.uid]; });
+
       if (!incoming.length) {
         toast(fromCsv
           ? 'That CSV needs columns for name, phone and registration number. Found none it could recognise.'
@@ -1595,19 +1761,31 @@ create policy "clinic full access" on patients
   });
 
   $('openAddBtn').addEventListener('click', openAddModal);
-  $('exportBtn').addEventListener('click', exportBackup);
+  $('exportBtn').addEventListener('click', openBackupModal);
+  $('downloadNowBtn').addEventListener('click', exportBackup);
   $('importBtn').addEventListener('click', function () { $('importFile').click(); });
 
   /* ------------------------ other tabs / sync ---------------------- */
 
   window.addEventListener('storage', function (e) {
-    if (e.key === STATE_KEY || e.key === LEGACY_KEY) {
-      var fresh = sanitizeState(readJSON(STATE_KEY));
-      if (fresh) {
-        state = fresh;
-        render();
-      }
-    }
+    if (e.key !== STATE_KEY && e.key !== LEGACY_KEY) return;
+    var fresh = sanitizeState(readJSON(STATE_KEY));
+    if (!fresh) return;
+
+    // Merge instead of replacing: a second tab saving must never discard a
+    // record that was just added in this tab.
+    var changed = false;
+    Object.keys(fresh.tombstones || {}).forEach(function (uid) {
+      if (!state.tombstones[uid]) { state.tombstones[uid] = fresh.tombstones[uid]; changed = true; }
+      var at = -1;
+      for (var i = 0; i < state.rows.length; i++) if (state.rows[i].uid === uid) { at = i; break; }
+      if (at !== -1) { state.rows.splice(at, 1); changed = true; }
+    });
+    if (mergeRows(state.rows, fresh.rows) > 0) changed = true;
+    if (fresh.cloudLastSync > (state.cloudLastSync || 0)) { state.cloudLastSync = fresh.cloudLastSync; changed = true; }
+
+    render();
+    if (changed) persist();
   });
 
   window.addEventListener('online', function () {
@@ -1662,8 +1840,16 @@ create policy "clinic full access" on patients
       bootNotes.push('Records recovered from the second on-device copy after browser storage was cleared.');
     }
 
+    if (state.rows.length) {
+      var manualAt = lastManualBackupAt();
+      if (!manualAt || (Date.now() - manualAt) > 7 * 86400000) {
+        bootNotes.push('There is ' + (manualAt ? 'no downloaded backup from the last 7 days' : 'no downloaded backup yet') +
+                       ' — press <b>Backup</b> and keep the file safe.');
+      }
+    }
+
     if (bootNotes.length) {
-      showBanner('<b>' + bootNotes.join(' ') + '</b> Everything is saved on this device and, automatically, on the clinic owner\'s server backup.', 'info');
+      showBanner('<b>' + bootNotes.join(' ') + '</b> Everything is saved on this device; press <b>Backup</b> for a copy you control.', 'info');
     } else if (!state.rows.length) {
       showBanner('No records are stored on this device yet. If the clinic used the old cloud database, that project no longer exists — anything you add now is saved here immediately and backed up to the owner\'s server.', 'warn');
     }
