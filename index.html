@@ -1802,6 +1802,15 @@ create policy "clinic full access" on patients
   /* ----------------------------- boot ------------------------------ */
 
   async function boot() {
+    /*
+     * Ask the browser to treat this origin's data as persistent so it is not
+     * evicted automatically when the disk fills up. Best-effort: some browsers
+     * grant it silently, others ignore it, and none of that blocks saving.
+     */
+    try {
+      if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
+    } catch (e) {}
+
     loadFromLocalStorage();
     render(); // paint whatever the browser already has, immediately
 
