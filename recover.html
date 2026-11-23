@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Recover clinic records from this device</title>
+<style>
+  :root { --ink:#10202e; --muted:#5b6b7c; --line:#dbe3ec; --accent:#0e6b3a; --accent-dark:#0a4d29; --warn:#8a4b00; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: Inter, -apple-system, Segoe UI, Roboto, sans-serif; color:var(--ink); background:#f4f7fb; padding:1.5rem 1rem 4rem; }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  h1 { font-size:1.35rem; margin:0 0 .35rem; }
+  p, li { line-height:1.55; color:var(--muted); font-size:.95rem; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:12px; padding:1.1rem; margin-top:1rem; }
+  .big { font-size:2.2rem; font-weight:800; color:var(--accent); margin:.2rem 0; }
+  .pill { display:inline-block; padding:.2rem .6rem; border-radius:999px; font-size:.78rem; font-weight:600; background:#eef2f7; color:var(--muted); }
+  .pill.ok { background:#e3f6ea; color:#0a5a30; }
+  .pill.warn { background:#fff3df; color:var(--warn); }
+  button { font:inherit; font-weight:700; border-radius:9px; padding:.7rem 1rem; cursor:pointer; border:1px solid transparent; }
+  button.primary { background:var(--accent); color:#fff; width:100%; font-size:1rem; }
+  button.primary:hover { background:var(--accent-dark); }
+  button.ghost { background:#fff; color:var(--ink); border-color:var(--line); }
+  .row { display:flex; gap:.5rem; flex-wrap:wrap; margin-top:.7rem; }
+  .row button { flex:1 1 180px; }
+  table { width:100%; border-collapse:collapse; margin-top:.8rem; font-size:.85rem; }
+  th,td { text-align:left; padding:.45rem .5rem; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-size:.72rem; text-transform:uppercase; letter-spacing:.03em; }
+  .status { margin-top:.8rem; font-size:.9rem; }
+  .status.err { color:#b3261e; }
+  .status.ok { color:#0a5a30; }
+  code { background:#eef2f7; padding:.1rem .3rem; border-radius:4px; }
+  .note { font-size:.82rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Recover clinic records from this device</h1>
+  <p>This page reads only what is already stored in <b>this</b> browser. Nothing leaves the device until you press the button.</p>
+
+  <div class="card">
+    <div class="pill" id="devicePill">scanning…</div>
+    <div class="big" id="count">0</div>
+    <div>records found in this browser</div>
+    <div class="status" id="status"></div>
+    <div class="row">
+      <button class="primary" id="sendBtn" type="button">Send records to the clinic owner</button>
+    </div>
+    <div class="row">
+      <button class="ghost" id="downloadBtn" type="button">Download a copy</button>
+      <button class="ghost" id="copyBtn" type="button">Copy text</button>
+    </div>
+  </div>
+
+  <div class="card" id="previewCard" hidden>
+    <div class="pill" id="previewPill">preview</div>
+    <table>
+      <thead><tr><th>Name</th><th>Phone</th><th>Registration</th><th>Notes</th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <p class="note"><b>If the counter is 0:</b> this is the wrong browser or the wrong address. Open this same link in the browser where the patients were entered, using the exact clinic link that was used before. On a phone this is usually Chrome or Safari; on a computer, Chrome, Edge or Brave.</p>
+    <p class="note">The clinic app has lived on more than one address. If the counter stays 0 here but you remember using the Freebuff preview, open <code>https://site-90530542d24f4a0a8f220f83ab1afa1d.freebuff.page</code> and ask the developer for the snippet for that address.</p>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var STATE_PREFIX = 'clinic_state';
+  var found = [];
+  var byKey = {};
+
+  function text(v) { return v == null ? '' : String(v); }
+  function norm(v) { return text(v).toLowerCase().replace(/[^a-z0-9]/g, ''); }
+  function digits(v) { return text(v).replace(/\D/g, ''); }
+
+  function addRow(r) {
+    if (!r || typeof r !== 'object') return;
+    var row = {};
+    for (var k in r) if (k === 'meta' && r[k] && typeof r[k] === 'object') { for (var m in r[k]) row[m] = r[k][m]; }
+    for (var k2 in r) if (k2 !== 'meta') row[k2] = r[k2];
+
+    if (!row.reg && row.id != null && !/^\d+$/.test(text(row.id).trim())) row.reg = text(row.id).trim();
+    if (!(row.name || row.phone || row.reg)) return;
+
+    var key = norm(row.reg) || digits(row.phone) || norm(row.name);
+    if (!key) return;
+    if (byKey[key]) {
+      // A later copy may carry notes the first copy lacked; keep them.
+      var existing = found.filter(function (r) { return r.key === key; })[0];
+      if (existing && !existing.notes && row.notes) existing.notes = text(row.notes);
+      return;
+    }
+    byKey[key] = true;
+    found.push({ key: key, name: text(row.name), phone: text(row.phone), reg: text(row.reg), notes: text(row.notes) });
+  }
+
+  function readJSON(v) { try { return JSON.parse(v); } catch (e) { return null; } }
+
+  function scanLocalStorage() {
+    var used = [];
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var key = localStorage.key(i);
+        var val = localStorage.getItem(key);
+        if (!val) continue;
+        var data = readJSON(val);
+        if (!data) continue;
+
+        if (Array.isArray(data)) { data.forEach(addRow); used.push(key); continue; }
+
+        if (key.indexOf('vitalis_cache') === 0) {
+          var list = Array.isArray(data.patients) ? data.patients : [];
+          var notes = data.notes || {};
+          list.forEach(function (p) {
+            var copy = {};
+            for (var k in p) copy[k] = p[k];
+            if (notes[copy.id] && !copy.notes) copy.notes = notes[copy.id];
+            addRow(copy);
+          });
+          used.push(key);
+          continue;
+        }
+
+        if (key.indexOf('vitalis_notes') === 0 && data && typeof data === 'object') {
+          for (var reg in data) {
+            if (!data[reg]) continue;
+            var match = found.filter(function (r) { return norm(r.reg) === norm(reg); })[0];
+            if (match) match.notes = text(data[reg]);
+          }
+          used.push(key);
+          continue;
+        }
+
+        if (Array.isArray(data.rows)) { data.rows.forEach(addRow); used.push(key); continue; }
+        if (Array.isArray(data.patients)) { data.patients.forEach(addRow); used.push(key); continue; }
+      }
+    } catch (e) {}
+    return used;
+  }
+
+  function scanIndexedDb() {
+    return new Promise(function (resolve) {
+      if (!window.indexedDB) return resolve([]);
+      var names = ['clinic-directory'];
+      var open = function (name) {
+        return new Promise(function (res) {
+          var settled = false;
+          var done = function (v) { if (settled) return; settled = true; res(v); };
+          var req;
+          try { req = indexedDB.open(name); } catch (e) { return done(null); }
+          // A stuck delete-pending database can hang forever; never block the page.
+          var timer = setTimeout(function () { done(null); }, 2500);
+          req.onsuccess = function () { clearTimeout(timer); done(req.result); };
+          req.onerror = function () { clearTimeout(timer); done(null); };
+          req.onblocked = function () { clearTimeout(timer); done(null); };
+          req.onupgradeneeded = function () {
+            clearTimeout(timer);
+            try { req.transaction.abort(); } catch (e) {}
+            done(null);
+          };
+        });
+      };
+      var storeNames = function (db) { return Array.prototype.slice.call(db.objectStoreNames || []); };
+      var readAll = function (db, store) {
+        return new Promise(function (res) {
+          try {
+            var r = db.transaction(store, 'readonly').objectStore(store).getAll();
+            var timer = setTimeout(function () { res([]); }, 4000);
+            r.onsuccess = function () { clearTimeout(timer); res(r.result || []); };
+            r.onerror = function () { clearTimeout(timer); res([]); };
+          } catch (e) { res([]); }
+        });
+      };
+
+      (async function () {
+        var used = [];
+        for (var i = 0; i < names.length; i++) {
+          var db = await open(names[i]);
+          if (!db) continue;
+          var stores = storeNames(db);
+          for (var s = 0; s < stores.length; s++) {
+            var values = await readAll(db, stores[s]);
+            values.forEach(function (v) {
+              if (!v) return;
+              if (Array.isArray(v.rows)) v.rows.forEach(addRow);
+              else if (Array.isArray(v.patients)) v.patients.forEach(addRow);
+              else if (v.state && Array.isArray(v.state.rows)) v.state.rows.forEach(addRow);
+              else addRow(v);
+            });
+            used.push(names[i] + '/' + stores[s]);
+          }
+          try { db.close(); } catch (e) {}
+        }
+        resolve(used);
+      })();
+    });
+  }
+
+  function payload() {
+    return {
+      app: 'clinic-patient-directory',
+      version: 2,
+      source: 'device-recovery',
+      takenAt: new Date().toISOString(),
+      origin: location.origin,
+      device: navigator.userAgent,
+      count: found.length,
+      rows: found.map(function (r) {
+        return {
+          uid: 'recovered-' + (norm(r.reg) || digits(r.phone) || norm(r.name)),
+          name: r.name, phone: r.phone, reg: r.reg,
+          createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+          meta: r.notes ? { notes: r.notes } : undefined
+        };
+      }),
+      tombstones: {},
+      seeded: true
+    };
+  }
+
+  function render() {
+    document.getElementById('count').textContent = String(found.length);
+    document.getElementById('devicePill').textContent = location.host;
+    var tb = document.getElementById('tbody');
+    tb.textContent = '';
+    found.slice(0, 200).forEach(function (r) {
+      var tr = document.createElement('tr');
+      [r.name, r.phone, r.reg, r.notes].forEach(function (v) {
+        var td = document.createElement('td');
+        td.textContent = v || '';
+        tr.appendChild(td);
+      });
+      tb.appendChild(tr);
+    });
+    document.getElementById('previewCard').hidden = found.length === 0;
+    document.getElementById('previewPill').textContent = found.length + ' found';
+  }
+
+  function setStatus(msg, kind) {
+    var el = document.getElementById('status');
+    el.textContent = msg;
+    el.className = 'status' + (kind ? ' ' + kind : '');
+  }
+
+  async function send(auto) {
+    if (!found.length) { setStatus('There is nothing to send from this browser.', 'err'); return; }
+    setStatus('Sending ' + found.length + ' records…');
+    try {
+      var res = await fetch('/api/backup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ snapshot: payload() })
+      });
+      var data = await res.json().catch(function () { return {}; });
+      if (data && data.configured === false) {
+        setStatus('The server backup is not set up yet. Use “Download a copy” and send that file to the clinic owner.', 'err');
+        return;
+      }
+      if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+      setStatus('Sent. ' + found.length + ' records reached the clinic owner.', 'ok');
+      if (auto) { /* keep the confirmation on screen */ }
+    } catch (e) {
+      setStatus('Could not send: ' + (e.message || e) + '. Use “Download a copy” instead.', 'err');
+    }
+  }
+
+  function download() {
+    var blob = new Blob([JSON.stringify(payload(), null, 2)], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'clinic-recovered-' + new Date().toISOString().slice(0, 10) + '.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+  }
+
+  document.getElementById('sendBtn').addEventListener('click', function () { send(false); });
+  document.getElementById('downloadBtn').addEventListener('click', download);
+  document.getElementById('copyBtn').addEventListener('click', function () {
+    var txt = JSON.stringify(payload(), null, 2);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(function () { setStatus('Copied to clipboard.', 'ok'); });
+    } else {
+      var ta = document.createElement('textarea');
+      ta.value = txt; document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); setStatus('Copied.', 'ok'); } catch (e) {}
+      ta.remove();
+    }
+  });
+
+  (async function init() {
+    scanLocalStorage();
+    render();
+    try { await scanIndexedDb(); } catch (e) {}
+    render();
+    var auto = /(\?|&)auto=1/.test(location.search);
+    if (auto && found.length) send(true);
+  })();
+})();
+</script>
+</body>
+</html>
