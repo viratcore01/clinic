@@ -58,6 +58,42 @@ The fixed page now reads **all** of these local keys on boot (`patients`, `vital
 `vitalis_backup_v1`. Clinical notes are shown in their own column and are editable in the patient
 form, so the 30 notes from the VM are visible instead of hidden in `meta`.
 
+### Forensic sweep of this machine (2026-11-23)
+
+A full local sweep was run to rule out any surviving copy of records the client entered on her own
+device:
+
+| Sweep | Scope | Result |
+| --- | --- | --- |
+| Binary artefact scan | 23,994 files / ~1 GB in Downloads, Desktop, Documents, OneDrive, WhatsApp, Telegram, Thunderbird, Outlook, YourPhone, Clipboard, MobileSync, `$Recycle.Bin` | 4 hits, all inside this project folder — no outside copy |
+| Chrome profile storage | IndexedDB + localStorage for every origin, via a headless copy of the profile | `clinic-directory` held the same **31 rows / 30 notes**; no extra records |
+| Chrome / Edge autofill | `Web Data` (`autofill`, profile tables) | no patient data (only `9313005400`, already in the registry) |
+| Chrome history / keywords | `Web Data` | no data routes or exports |
+| Other browsers / profiles | Edge, Opera, Firefox, WebView, installed PWAs | no clinic storage at all |
+
+The Chrome copies found on this machine are saved verbatim in
+`data/chrome-profile-recovery-2026-11-23.json` (31 rows, 30 notes, with which store each row came
+from). They are identical in content to the live registry, which confirms the registry is fully
+recovered and that the only records still outstanding are ones that exist **only** on the client's
+own device.
+
+### One-tap recovery page for the client's device
+
+`recover.html` is a standalone page (no dependencies, read-only, `noindex`) that scans the browser it
+is opened in for every known clinic key — `patients`, `clinic_state_v2`, `patients_backup_v1`,
+`clinic_snapshot_*`, `vitalis_cache_v2`, `vitalis_notes_v1` — plus the IndexedDB databases
+`clinic-directory` (`kv` and `history`). It merges duplicates, previews the rows, and then either
+**sends** them to `/api/backup` (the owner's append-only server backup) or lets the client download
+or copy them.
+
+- Open: `https://clinic-ochre-seven.vercel.app/recover.html`
+- Auto-send variant: `https://clinic-ochre-seven.vercel.app/recover.html?auto=1`
+- Short link: `https://clinic-ochre-seven.vercel.app/r`
+
+Because browser storage is per-origin, the page can only see the storage of the address it was served
+from. If the client used a different address, the equivalent page must be opened on that address (or
+`recovery-snippet.txt` run there).
+
 ### Server-side stores: what was checked and what is left
 
 - Supabase `oqarvapuiiqfjemqubfh` — **never existed** (see above). Nothing to recover.
