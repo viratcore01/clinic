@@ -223,12 +223,12 @@ Try these in order — each one is local to the browser that was actually used:
    picked up and shown straight away; a blue banner confirms how many were restored.
 2. If that browser's storage was cleared, the page restores from its own second copy on the next
    visit.
-3. If neither works, the records are still on the old Supabase server if that project was only
-   *paused* rather than deleted: sign in at <https://supabase.com/dashboard>, open the project and
-   restore it, then copy the table out (Table editor → `patients` → Export CSV) and load it with
-   **Restore** (CSV is not read directly — save it as JSON, or re-add from the CSV).
-4. If the project is gone entirely, Supabase support can sometimes recover a project backup for a
-   short window after deletion.
+3. If neither works, the records are not recoverable from the browser or from any server. The old
+   Supabase host (`oqarvapuiiqfjemqubh.supabase.co`) does not resolve and has **no** passive-DNS
+   history, so it never answered a query; the owner-side backup was never configured. See
+   [`AUDIT-2026-11-23.md`](AUDIT-2026-11-23.md) for the evidence.
+4. Re-entry from the paper register is then the only path. Enter on the same browser the clinic uses,
+   press **Backup** after each session, and keep the downloaded file off the machine.
 
 ## Deploying
 
@@ -244,3 +244,16 @@ git push
 
 Vercel redeploys `master` automatically. Private browsing still hides the data afterwards — use a
 normal window for the clinic machine.
+
+## Audit update — 23 November 2026
+
+Full report: [`AUDIT-2026-11-23.md`](AUDIT-2026-11-23.md).
+
+- Loss cause confirmed: the 19 Oct Supabase commit removed every local write; the host never resolved
+  (checked against passive DNS, not just current resolution).
+- 31 records verified in four places: `clinic_state_v2`, the legacy `patients` key, IndexedDB and
+  `data/live-registry-backup-2026-11-19.json`, plus the second server app (31 patients, 30 notes).
+- Backups are now verified before download, restorable per version, and add-only when restored.
+- `navigator.storage.persist()` is requested at boot. Browsers may decline it — a downloaded file is
+  still the only copy that survives losing the device.
+- Off-device snapshots remain inactive until `GITHUB_TOKEN` and `BACKUP_REPO` are set in Vercel.

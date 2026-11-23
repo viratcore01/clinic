@@ -1,0 +1,11 @@
+# Raw patient data captured during recovery work must never be committed.
+# These files contain real names, phone numbers and clinical notes.
+data/browser-store-dump.json
+data/browser-traces-report*.json
+data/live-freebuff-*.js
+data/live-freebuff-*.json
+
+# Local tooling output
+*.log
+node_modules/
+.DS_Store
